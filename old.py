@@ -25,7 +25,12 @@ z_data = deque(maxlen=MAX_SAMPLES_SENSOR)
 time_data = deque(maxlen=MAX_SAMPLES_SENSOR)
 timestamp_data = deque(maxlen=MAX_SAMPLES_SENSOR)
 
+x_filtered = deque(maxlen=MAX_SAMPLES_SENSOR)
+y_filtered = deque(maxlen=MAX_SAMPLES_SENSOR)
+z_filtered = deque(maxlen=MAX_SAMPLES_SENSOR)
+
 pga_raw = deque(maxlen=MAX_SAMPLES_SENSOR)
+pga_filtered = deque(maxlen=MAX_SAMPLES_SENSOR)
 
 intensity_history = deque(maxlen=MAX_SAMPLES_INTENSITY)
 a_history = deque(maxlen=MAX_SAMPLES_INTENSITY)
@@ -61,14 +66,90 @@ FFT_WINDOW = np.hanning(FFT_SIZE).astype(np.float32)
 FFT_PSD_SCALE = 1.0 / (FFT_FS * FFT_N)
 N_HALF_PLUS_ONE = FFT_N // 2 + 1
 
+NPAD = 4096
+FILTER_FREQS = np.fft.fftfreq(NPAD, d=1.0/FFT_FS)
+FILTER_COEFFS = None
+
+
+def jma_low_cut_filter(f):
+    """JMA Low-cut 濾波器: sqrt(1 - exp(-(f/0.5)^3))"""
+    ratio = f / 0.5
+    return np.sqrt(1.0 - np.exp(-np.power(ratio, 3.0)))
+
+
+def jma_high_cut_filter(f):
+    """JMA High-cut 濾波器"""
+    y = f / 10.0
+    y2 = y * y
+    y4 = y2 * y2
+    y6 = y4 * y2
+    y8 = y6 * y2
+    y10 = y8 * y2
+    y12 = y10 * y2
+
+    denominator = (1.0 + 0.694 * y2 + 0.241 * y4 + 0.0557 * y6 +
+                   0.009664 * y8 + 0.00134 * y10 + 0.000155 * y12)
+
+    return np.power(denominator, -0.5)
+
+
+def jma_period_effect_filter(f):
+    """JMA 周期效果濾波器: sqrt(1/f)"""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        result = np.sqrt(1.0 / f)
+        result[f == 0] = 0.0
+    return result
+
+
+def jma_combined_filter(f):
+    """JMA 綜合濾波器"""
+    with np.errstate(divide='ignore', invalid='ignore'):
+        result = jma_low_cut_filter(
+            f) * jma_high_cut_filter(f) * jma_period_effect_filter(f)
+        result[f == 0] = 0.0
+    return result
+
 
 def compute_psd_db(fft_data):
     """計算功率譜密度並轉換為 dB"""
+    # 只取正頻率部分
     dft = fft_data[:N_HALF_PLUS_ONE]
+
+    # 計算 PSD
     psd = FFT_PSD_SCALE * np.abs(dft)**2
+
+    # 對於非直流和奈奎斯特頻率，功率需要乘以 2
     psd[1:-1] *= 2
+
+    # 轉換為 dB 並限制範圍
     psd_db = 10 * np.log10(psd + 1e-20)
     return np.clip(psd_db, -110, 0)
+
+
+def init_filter_coeffs():
+    """預先計算濾波器係數"""
+    global FILTER_COEFFS
+    FILTER_COEFFS = jma_combined_filter(
+        np.abs(FILTER_FREQS)).astype(np.float32)
+
+
+def apply_jma_filter(data, sampling_rate=50):
+    """
+    應用 JMA 綜合濾波器 (使用 FFT 頻域濾波)
+    參考: ES-Net intensity.cpp 實現
+    """
+    if len(data) < 50:
+        return data
+
+    data_array = np.array(data, dtype=np.float32)
+    n = len(data_array)
+
+    padded_data = np.pad(data_array, (0, NPAD - n), mode='constant')
+    fft_data = np.fft.fft(padded_data)
+    filtered_fft = fft_data * FILTER_COEFFS
+    filtered_data = np.fft.ifft(filtered_fft).real
+
+    return filtered_data[:n]
 
 
 def clean_old_data():
@@ -289,6 +370,23 @@ def parsing_thread():
 
                         pga_raw.clear()
                         pga_raw.extend(pga_raw_arr)
+
+                        x_filt = apply_jma_filter(list(x_data))
+                        y_filt = apply_jma_filter(list(y_data))
+                        z_filt = apply_jma_filter(list(z_data))
+
+                        if len(x_filt) == len(x_data):
+                            x_filtered.clear()
+                            x_filtered.extend(x_filt)
+                            y_filtered.clear()
+                            y_filtered.extend(y_filt)
+                            z_filtered.clear()
+                            z_filtered.extend(z_filt)
+
+                            pga_filt_arr = np.sqrt(
+                                x_filt**2 + y_filt**2 + z_filt**2)
+                            pga_filtered.clear()
+                            pga_filtered.extend(pga_filt_arr)
                     except Exception as e:
                         pass
 
@@ -341,6 +439,18 @@ def update_plot(frame):
             line_z.set_data(time_list, z_list)
             ax1.set_xlim(x_min, x_max)
 
+        x_filt_list = []
+        y_filt_list = []
+        z_filt_list = []
+        if len(x_filtered) == data_len:
+            x_filt_list = list(x_filtered)
+            y_filt_list = list(y_filtered)
+            z_filt_list = list(z_filtered)
+            line_x_filt.set_data(time_list, x_filt_list)
+            line_y_filt.set_data(time_list, y_filt_list)
+            line_z_filt.set_data(time_list, z_filt_list)
+        ax2.set_xlim(x_min, x_max)
+
         if should_update_fft and data_len >= FFT_SIZE:
             x_arr = np.array(x_list[-FFT_SIZE:], dtype=np.float32)
             y_arr = np.array(y_list[-FFT_SIZE:], dtype=np.float32)
@@ -358,22 +468,22 @@ def update_plot(frame):
             line_fft_y.set_data(FFT_FREQS_POS, psd_y)
             line_fft_z.set_data(FFT_FREQS_POS, psd_z)
 
-            if len(h1_data) >= FFT_SIZE:
-                h1_arr = np.array(list(h1_data)[-FFT_SIZE:], dtype=np.float32)
-                h2_arr = np.array(list(h2_data)[-FFT_SIZE:], dtype=np.float32)
-                v_arr = np.array(list(v_data)[-FFT_SIZE:], dtype=np.float32)
+            if len(x_filtered) >= FFT_SIZE and len(x_filt_list) > 0:
+                x_filt_arr = np.array(x_filt_list[-FFT_SIZE:], dtype=np.float32)
+                y_filt_arr = np.array(y_filt_list[-FFT_SIZE:], dtype=np.float32)
+                z_filt_arr = np.array(z_filt_list[-FFT_SIZE:], dtype=np.float32)
 
-                fft_h1 = np.fft.fft(h1_arr * FFT_WINDOW)
-                fft_h2 = np.fft.fft(h2_arr * FFT_WINDOW)
-                fft_v = np.fft.fft(v_arr * FFT_WINDOW)
+                fft_x_filt = np.fft.fft(x_filt_arr * FFT_WINDOW)
+                fft_y_filt = np.fft.fft(y_filt_arr * FFT_WINDOW)
+                fft_z_filt = np.fft.fft(z_filt_arr * FFT_WINDOW)
 
-                psd_h1 = compute_psd_db(fft_h1)
-                psd_h2 = compute_psd_db(fft_h2)
-                psd_v = compute_psd_db(fft_v)
+                psd_x_filt = compute_psd_db(fft_x_filt)
+                psd_y_filt = compute_psd_db(fft_y_filt)
+                psd_z_filt = compute_psd_db(fft_z_filt)
 
-                line_fft_h1.set_data(FFT_FREQS_POS, psd_h1)
-                line_fft_h2.set_data(FFT_FREQS_POS, psd_h2)
-                line_fft_v.set_data(FFT_FREQS_POS, psd_v)
+                line_fft_x_filt.set_data(FFT_FREQS_POS, psd_x_filt)
+                line_fft_y_filt.set_data(FFT_FREQS_POS, psd_y_filt)
+                line_fft_z_filt.set_data(FFT_FREQS_POS, psd_z_filt)
 
             _last_fft_update_time = current_time
 
@@ -401,7 +511,7 @@ def update_plot(frame):
             line_v.set_data(filtered_time_list, v_list)
             ax6.set_xlim(x_min, x_max)
 
-    for fig in [fig1, fig3, fig4, fig5, fig6]:
+    for fig in [fig1, fig2, fig3, fig4, fig5, fig6]:
         fig.canvas.draw_idle()
     fig6.canvas.flush_events()
 
@@ -444,10 +554,9 @@ def print_statistics():
 
 def main():
     """主程式"""
-    global ax1, ax3, ax4, ax5, ax6, fig1, fig3, fig4, fig5, fig6
-    global line_x, line_y, line_z
-    global line_fft_x, line_fft_y, line_fft_z
-    global line_fft_h1, line_fft_h2, line_fft_v
+    global ax1, ax2, ax3, ax4, ax5, ax6, fig1, fig2, fig3, fig4, fig5, fig6
+    global line_x, line_y, line_z, line_x_filt, line_y_filt, line_z_filt
+    global line_fft_x, line_fft_y, line_fft_z, line_fft_x_filt, line_fft_y_filt, line_fft_z_filt
     global line_pga_raw_5, line_pga_filt_5, line_i, line_h1, line_h2, line_v
 
     print("QuakeWatch - ES-Net Data Visualization")
@@ -461,6 +570,10 @@ def main():
 
     print(f"\n✓ 數據庫文件: {DB_FILE}")
 
+    print("初始化濾波器係數...")
+    init_filter_coeffs()
+    print("✓ 濾波器係數已預先計算")
+
     try:
         plt.rcParams['font.sans-serif'] = ['Arial Unicode MS',
                                            'Heiti TC', 'SimHei']
@@ -471,15 +584,17 @@ def main():
     plt.style.use('dark_background')
 
     fig1 = plt.figure(num='圖表1: 三軸加速度', figsize=(10, 5))
-    fig3 = plt.figure(num='圖表2: 三軸頻譜', figsize=(10, 5))
-    fig4 = plt.figure(num='圖表3: 三軸頻譜(濾波)', figsize=(10, 5))
-    fig5 = plt.figure(num='圖表4: PGA + 計測震度 + 震度階', figsize=(12, 5))
-    fig6 = plt.figure(num='圖表5: 三軸加速度(濾波)', figsize=(10, 5))
+    fig2 = plt.figure(num='圖表2: 三軸濾波', figsize=(10, 5))
+    fig3 = plt.figure(num='圖表3: 三軸頻譜', figsize=(10, 5))
+    fig4 = plt.figure(num='圖表4: 三軸濾波頻譜', figsize=(10, 5))
+    fig5 = plt.figure(num='圖表5: PGA + 震度', figsize=(12, 5))
+    fig6 = plt.figure(num='圖表6: Serial 三軸濾波', figsize=(10, 5))
 
-    for fig in [fig1, fig3, fig4, fig5, fig6]:
+    for fig in [fig1, fig2, fig3, fig4, fig5, fig6]:
         fig.patch.set_facecolor('#0d1117')
 
     ax1 = fig1.add_subplot(111)
+    ax2 = fig2.add_subplot(111)
     ax3 = fig3.add_subplot(111)
     ax4 = fig4.add_subplot(111)
     ax5 = fig5.add_subplot(111)
@@ -504,8 +619,27 @@ def main():
     ax1.axhline(y=0, color='gray', linestyle='-', linewidth=0.7, alpha=0.3)
     fig1.tight_layout()
 
+    ax2.set_facecolor('#161b22')
+    ax2.set_title('三軸濾波', fontsize=14, fontweight='bold',
+                  color='#58a6ff', pad=12)
+    ax2.set_xlabel('時間 (秒)', fontsize=11)
+    ax2.set_ylabel('加速度 (Gal)', fontsize=11)
+    ax2.grid(True, alpha=0.25, linestyle='--', linewidth=0.7)
+
+    line_x_filt, = ax2.plot(
+        [], [], '#ff6b6b', label='X 軸', linewidth=1.3, alpha=0.85)
+    line_y_filt, = ax2.plot(
+        [], [], '#4ecdc4', label='Y 軸', linewidth=1.3, alpha=0.85)
+    line_z_filt, = ax2.plot(
+        [], [], '#45b7d1', label='Z 軸', linewidth=1.3, alpha=0.85)
+
+    ax2.legend(loc='upper right', fontsize=10, framealpha=0.8)
+    ax2.set_ylim(-1, 1)
+    ax2.axhline(y=0, color='gray', linestyle='-', linewidth=0.7, alpha=0.3)
+    fig2.tight_layout()
+
     ax3.set_facecolor('#161b22')
-    ax3.set_title('三軸頻譜 0-25Hz', fontsize=13,
+    ax3.set_title('三軸頻譜 (未濾波, 0-25Hz)', fontsize=13,
                   fontweight='bold', color='#58a6ff', pad=10)
     ax3.set_xlabel('頻率 (Hz)', fontsize=10)
     ax3.set_ylabel('功率譜密度 (dB)', fontsize=10)
@@ -520,10 +654,9 @@ def main():
     line_fft_z, = ax3.plot([], [], '#45b7d1', label='Z 軸',
                            linewidth=1.2, alpha=0.8)
     ax3.legend(loc='upper right', fontsize=9, framealpha=0.7)
-    fig3.tight_layout()
 
     ax4.set_facecolor('#161b22')
-    ax4.set_title('三軸頻譜 0-25Hz (濾波)', fontsize=13,
+    ax4.set_title('三軸頻譜 (濾波後, 0-25Hz)', fontsize=13,
                   fontweight='bold', color='#58a6ff', pad=10)
     ax4.set_xlabel('頻率 (Hz)', fontsize=10)
     ax4.set_ylabel('功率譜密度 (dB)', fontsize=10)
@@ -531,20 +664,19 @@ def main():
     ax4.set_xlim(0, 25)
     ax4.set_ylim(-110, 0)
 
-    line_fft_h1, = ax4.plot(
+    line_fft_x_filt, = ax4.plot(
         [], [], '#ff6b6b', label='X 軸', linewidth=1.2, alpha=0.8)
-    line_fft_h2, = ax4.plot(
+    line_fft_y_filt, = ax4.plot(
         [], [], '#4ecdc4', label='Y 軸', linewidth=1.2, alpha=0.8)
-    line_fft_v, = ax4.plot([], [], '#45b7d1', label='Z 軸',
-                           linewidth=1.2, alpha=0.8)
+    line_fft_z_filt, = ax4.plot(
+        [], [], '#45b7d1', label='Z 軸', linewidth=1.2, alpha=0.8)
     ax4.legend(loc='upper right', fontsize=9, framealpha=0.7)
-    fig4.tight_layout()
 
     ax5.set_facecolor('#161b22')
     ax5_twin = ax5.twinx()
     ax5_twin.set_facecolor('#161b22')
 
-    ax5.set_title('PGA + 計測震度 + 震度階', fontsize=13,
+    ax5.set_title('PGA + 計測震度 + 震度階級', fontsize=13,
                   fontweight='bold', color='#58a6ff', pad=10)
     ax5.set_xlabel('時間 (秒)', fontsize=10)
     ax5.set_ylabel('PGA (Gal)', fontsize=10, color='white')
@@ -552,9 +684,9 @@ def main():
     ax5.grid(True, alpha=0.25, linestyle='--', linewidth=0.6)
 
     line_pga_raw_5, = ax5.plot(
-        [], [], '#ff9500', label='PGA', linewidth=1.8, alpha=0.85)
+        [], [], '#ff9500', label='PGA 未濾波', linewidth=1.8, alpha=0.85)
     line_pga_filt_5, = ax5.plot(
-        [], [], '#6bcf7f', label='PGA(濾波)', linewidth=2, alpha=0.95)
+        [], [], '#6bcf7f', label='PGA 濾波 (a)', linewidth=2, alpha=0.95)
 
     line_i, = ax5_twin.plot([], [], '#ffd93d', label='計測震度', linewidth=2.5, marker='o',
                             markersize=5, markerfacecolor='#ffd93d', markeredgecolor='white',
@@ -569,23 +701,25 @@ def main():
                          linewidth=0.5, alpha=0.25)
 
     lines_leg = [line_pga_raw_5, line_pga_filt_5, line_i]
-    labels_leg = ['PGA', 'PGA(濾波)', '計測震度']
+    labels_leg = ['PGA 未濾波', 'PGA 濾波 (a)', '計測震度']
     ax5.legend(lines_leg, labels_leg, loc='upper right',
                fontsize=10, framealpha=0.8)
+    fig3.tight_layout()
+    fig4.tight_layout()
     fig5.tight_layout()
 
     ax6.set_facecolor('#161b22')
-    ax6.set_title('三軸加速度(濾波)', fontsize=14,
+    ax6.set_title('Serial 三軸濾波 (ESP32)', fontsize=14,
                   fontweight='bold', color='#58a6ff', pad=12)
     ax6.set_xlabel('時間 (秒)', fontsize=11)
     ax6.set_ylabel('加速度 (Gal)', fontsize=11)
     ax6.grid(True, alpha=0.25, linestyle='--', linewidth=0.7)
 
-    line_h1, = ax6.plot([], [], '#ff6b6b', label='X 軸',
+    line_h1, = ax6.plot([], [], '#ff6b6b', label='H1 軸',
                         linewidth=1.3, alpha=0.85)
-    line_h2, = ax6.plot([], [], '#4ecdc4', label='Y 軸',
+    line_h2, = ax6.plot([], [], '#4ecdc4', label='H2 軸',
                         linewidth=1.3, alpha=0.85)
-    line_v, = ax6.plot([], [], '#45b7d1', label='Z 軸',
+    line_v, = ax6.plot([], [], '#45b7d1', label='V 軸',
                        linewidth=1.3, alpha=0.85)
 
     ax6.legend(loc='upper right', fontsize=10, framealpha=0.8)
