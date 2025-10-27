@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 
 DB_FILE = 'earthquake_data.db'
 TZ_UTC_8 = timezone(timedelta(hours=8))
-DATA_WINDOW_LENGTH = 60
+DATA_WINDOW_LENGTH = 10
 MAX_SAMPLES_SENSOR = int(DATA_WINDOW_LENGTH * 50 * 1.2)
 MAX_SAMPLES_INTENSITY = int(DATA_WINDOW_LENGTH * 2 * 1.2)
 
@@ -149,14 +149,14 @@ def parsing_thread():
 
             if last_rx_sensor is None:
                 cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? ORDER BY received_time ASC',
+                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? ORDER BY timestamp_ms ASC',
                     (cutoff_time,))
                 sensor_rows = cursor.fetchall()
                 if sensor_rows:
                     last_rx_sensor = sensor_rows[-1][4]
             else:
                 cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? AND received_time > ? ORDER BY received_time ASC',
+                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? AND received_time > ? ORDER BY timestamp_ms ASC',
                     (max(last_rx_sensor, cutoff_time), cutoff_time))
                 sensor_rows = cursor.fetchall()
 
@@ -167,21 +167,16 @@ def parsing_thread():
                         last_rx_sensor = received_time
                         if first_received_time is None:
                             first_received_time = received_time
-                        if first_timestamp is None and timestamp > 0:
-                            first_timestamp = timestamp
+
+                        if timestamp >= 1000000000000:
+                            if first_timestamp is None or timestamp < first_timestamp:
+                                first_timestamp = timestamp
 
                         x_data.append(x)
                         y_data.append(y)
                         z_data.append(z)
 
-                        if timestamp > 0:
-                            if timestamp > 1000000000000:
-                                if first_timestamp is None or timestamp < first_timestamp:
-                                    first_timestamp = timestamp
-                            else:
-                                if first_timestamp is None:
-                                    first_timestamp = timestamp
-
+                        if timestamp >= 1000000000000 and first_timestamp is not None:
                             adjusted_time = (
                                 timestamp - first_timestamp) / 1000.0
                         else:
@@ -211,25 +206,32 @@ def parsing_thread():
                         last_rx_intensity = received_time
                         if first_received_time is None:
                             first_received_time = received_time
-                        if first_timestamp is None and timestamp > 0:
-                            first_timestamp = timestamp
+                        if timestamp >= 1000000000000:
+                            if first_timestamp is None or timestamp < first_timestamp:
+                                first_timestamp = timestamp
                         intensity_history.append(intensity)
                         a_history.append(a)
-                        intensity_time.append(
-                            received_time - first_received_time)
+
+                        if timestamp >= 1000000000000 and first_timestamp is not None:
+                            adjusted_time_int = (
+                                timestamp - first_timestamp) / 1000.0
+                        else:
+                            adjusted_time_int = received_time - first_received_time
+
+                        intensity_time.append(adjusted_time_int)
                         intensity_timestamp.append(timestamp)
                         parse_stats['total_parsed'] += 1
 
             if last_rx_filtered is None:
                 cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? ORDER BY received_time ASC',
+                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? ORDER BY timestamp_ms ASC',
                     (cutoff_time,))
                 filtered_rows = cursor.fetchall()
                 if filtered_rows:
                     last_rx_filtered = filtered_rows[-1][4]
             else:
                 cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? AND received_time > ? ORDER BY received_time ASC',
+                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? AND received_time > ? ORDER BY timestamp_ms ASC',
                     (max(last_rx_filtered, cutoff_time), cutoff_time))
                 filtered_rows = cursor.fetchall()
 
@@ -240,21 +242,16 @@ def parsing_thread():
                         last_rx_filtered = received_time
                         if first_received_time is None:
                             first_received_time = received_time
-                        if first_timestamp is None and timestamp > 0:
-                            first_timestamp = timestamp
+
+                        if timestamp >= 1000000000000:
+                            if first_timestamp is None or timestamp < first_timestamp:
+                                first_timestamp = timestamp
 
                         h1_data.append(h1)
                         h2_data.append(h2)
                         v_data.append(v)
 
-                        if timestamp > 0:
-                            if timestamp > 1000000000000:
-                                if first_timestamp is None or timestamp < first_timestamp:
-                                    first_timestamp = timestamp
-                            else:
-                                if first_timestamp is None:
-                                    first_timestamp = timestamp
-
+                        if timestamp >= 1000000000000 and first_timestamp is not None:
                             adjusted_time_filt = (
                                 timestamp - first_timestamp) / 1000.0
                         else:
