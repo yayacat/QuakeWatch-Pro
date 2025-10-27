@@ -500,7 +500,7 @@ def main():
                        linewidth=1.3, alpha=0.85)
 
     ax1.legend(loc='upper right', fontsize=10, framealpha=0.8)
-    ax1.set_ylim(-1, 1)
+    ax1.set_ylim(-5, 5)
     ax1.axhline(y=0, color='gray', linestyle='-', linewidth=0.7, alpha=0.3)
     fig1.tight_layout()
 
