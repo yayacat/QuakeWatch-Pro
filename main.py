@@ -473,7 +473,7 @@ def main():
     fig1 = plt.figure(num='圖表1: 三軸加速度', figsize=(10, 5))
     fig3 = plt.figure(num='圖表2: 三軸頻譜', figsize=(10, 5))
     fig4 = plt.figure(num='圖表3: 三軸頻譜(濾波)', figsize=(10, 5))
-    fig5 = plt.figure(num='圖表4: PGA + 計測震度 + 震度階', figsize=(12, 5))
+    fig5 = plt.figure(num='圖表4: PGA + 計測震度', figsize=(12, 5))
     fig6 = plt.figure(num='圖表5: 三軸加速度(濾波)', figsize=(10, 5))
 
     for fig in [fig1, fig3, fig4, fig5, fig6]:
@@ -544,7 +544,7 @@ def main():
     ax5_twin = ax5.twinx()
     ax5_twin.set_facecolor('#161b22')
 
-    ax5.set_title('PGA + 計測震度 + 震度階', fontsize=13,
+    ax5.set_title('PGA + 計測震度', fontsize=13,
                   fontweight='bold', color='#58a6ff', pad=10)
     ax5.set_xlabel('時間 (秒)', fontsize=10)
     ax5.set_ylabel('PGA (Gal)', fontsize=10, color='white')
