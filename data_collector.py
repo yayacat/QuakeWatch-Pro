@@ -284,6 +284,10 @@ def collecting_thread(ser_ref, conn, port_name):
     filtered_buffer = []
     intensity_buffer = []
 
+    # NTP 警告設定
+    last_ntp_warning = 0
+    ntp_warning_interval = 5.0
+
     print("[收集線程] 已啟動 (延遲寫入: 500ms)\n")
 
     while collecting_active.is_set():
@@ -305,21 +309,21 @@ def collecting_thread(ser_ref, conn, port_name):
                 reconnect_count = 0
 
             # 計算時間間隔並分配時間戳
+            current_time = time.time()
             if batch_results:
                 timestamp_end = get_timestamp_utc8()
                 batch_count = len(batch_results)
                 time_interval = (timestamp_end - timestamp_start) / \
                     batch_count if batch_count > 1 else 0
 
+                has_no_ntp = False
                 for i, result in enumerate(batch_results):
                     # 如果 timestamp 為 0，使用平分的時間
                     if result[1] == 0:
+                        has_no_ntp = True
                         calculated_timestamp = timestamp_start + \
                             int(i * time_interval)
                         result = (result[0], calculated_timestamp, *result[2:])
-
-                    if result[0] == 'sensor':
-                        print(f"sensor timestamp: {result[1]}")
 
                     # 分類存入緩衝區
                     data_type = result[0]
@@ -329,8 +333,13 @@ def collecting_thread(ser_ref, conn, port_name):
                         filtered_buffer.append(result)
                     elif data_type == 'intensity':
                         intensity_buffer.append(result)
+
+                # NTP 警告
+                if has_no_ntp and (current_time - last_ntp_warning >= ntp_warning_interval):
+                    print("[警告] 無 NTP 時間戳，使用本地時間計算 (可能不準確)")
+                    last_ntp_warning = current_time
+
             # 延遲寫入機制：只寫入足夠舊的數據
-            current_time = time.time()
             current_timestamp = get_timestamp_utc8()
             cutoff_timestamp = current_timestamp - BUFFER_DELAY_MS
 
