@@ -12,10 +12,11 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from collections import deque
 from datetime import datetime, timezone, timedelta
+from scipy import signal
 
 DB_FILE = 'earthquake_data.db'
 TZ_UTC_8 = timezone(timedelta(hours=8))
-DATA_WINDOW_LENGTH = 10
+DATA_WINDOW_LENGTH = 60
 MAX_SAMPLES_SENSOR = int(DATA_WINDOW_LENGTH * 50 * 1.2)
 MAX_SAMPLES_INTENSITY = int(DATA_WINDOW_LENGTH * 2 * 1.2)
 
@@ -60,6 +61,12 @@ FFT_FREQS_POS = np.fft.rfftfreq(FFT_N, d=1.0/FFT_FS)
 FFT_WINDOW = np.hanning(FFT_SIZE).astype(np.float32)
 FFT_PSD_SCALE = 1.0 / (FFT_FS * FFT_N)
 N_HALF_PLUS_ONE = FFT_N // 2 + 1
+
+# 聲譜圖參數
+SPEC_NPERSEG = 128     # FFT 窗口大小：128 樣本 = 2.56 秒
+SPEC_NOVERLAP = 85     # 重疊樣本數：85/128 = 66.4% 重疊，時間步進 = 0.86 秒
+SPEC_POWER_MIN = -45   # dB 色標最小值
+SPEC_POWER_MAX = 0     # dB 色標最大值
 
 
 def compute_psd_db(fft_data):
@@ -278,7 +285,6 @@ def parsing_thread():
                 clean_old_data()
             last_clean_time = current_check_time
 
-
         if current_check_time - parse_stats['last_report_time'] >= report_interval:
             with data_lock:
                 parsed_count = parse_stats['total_parsed'] - \
@@ -370,6 +376,40 @@ def update_plot(frame):
 
             _last_fft_update_time = current_time
 
+        # 更新聲譜圖（使用最近 5 秒的數據）- 獨立於 FFT 更新
+        if should_update_fft and data_len >= SPEC_NPERSEG:
+            # 使用所有當前窗口的數據（DATA_WINDOW_LENGTH）
+            z_for_spec = np.array(z_list, dtype=np.float32)
+            spec_x_min = time_list[0] if len(time_list) > 0 else 0
+            spec_x_max = time_list[-1] if len(
+                time_list) > 0 else DATA_WINDOW_LENGTH
+
+            # 計算 STFT
+            freqs, times, Sxx = signal.spectrogram(
+                z_for_spec,
+                fs=FFT_FS,
+                nperseg=SPEC_NPERSEG,
+                noverlap=SPEC_NOVERLAP,
+                window='hann',  # 使用 'hann' 而不是 'hanning'
+                scaling='density'
+            )
+
+            # 轉換為 dB
+            Sxx_db = 10 * np.log10(Sxx + 1e-20)
+
+            # 只顯示 0-25 Hz
+            freq_mask = freqs <= 25
+            freqs_plot = freqs[freq_mask]
+            Sxx_plot = Sxx_db[freq_mask, :]
+
+            # 更新圖像
+            spectrogram_image.set_data(Sxx_plot)
+            spectrogram_image.set_extent([spec_x_min, spec_x_max, 0, 25])
+
+            # 固定色標範圍（-40 到 0 dB）
+            spectrogram_image.set_clim(
+                vmin=SPEC_POWER_MIN, vmax=SPEC_POWER_MAX)
+
         if data_len > 0:
             pga_raw_list = list(pga_raw)
             line_pga_raw_5.set_data(time_list, pga_raw_list)
@@ -403,9 +443,9 @@ def update_plot(frame):
                 ax6.set_ylim(y_min_filt - padding_filt,
                              y_max_filt + padding_filt)
 
-    for fig in [fig1, fig3, fig4, fig5, fig6]:
+    for fig in [fig1, fig3, fig4, fig5, fig6, fig7]:
         fig.canvas.draw_idle()
-    fig6.canvas.flush_events()
+    fig7.canvas.flush_events()
 
 
 def print_statistics():
@@ -446,11 +486,12 @@ def print_statistics():
 
 def main():
     """主程式"""
-    global ax1, ax3, ax4, ax5, ax6, fig1, fig3, fig4, fig5, fig6
+    global ax1, ax3, ax4, ax5, ax6, ax7, fig1, fig3, fig4, fig5, fig6, fig7
     global line_x, line_y, line_z
     global line_fft_x, line_fft_y, line_fft_z
     global line_fft_h1, line_fft_h2, line_fft_v
     global line_pga_raw_5, line_pga_filt_5, line_i, line_h1, line_h2, line_v
+    global spectrogram_image
 
     print("QuakeWatch - ES-Net Data Visualization")
     print("="*60)
@@ -477,8 +518,9 @@ def main():
     fig4 = plt.figure(num='圖表3: 三軸頻譜(濾波)', figsize=(10, 5))
     fig5 = plt.figure(num='圖表4: PGA + 計測震度', figsize=(12, 5))
     fig6 = plt.figure(num='圖表5: 三軸加速度(濾波)', figsize=(10, 5))
+    fig7 = plt.figure(num='圖表6: 聲譜圖', figsize=(12, 6))
 
-    for fig in [fig1, fig3, fig4, fig5, fig6]:
+    for fig in [fig1, fig3, fig4, fig5, fig6, fig7]:
         fig.patch.set_facecolor('#0d1117')
 
     ax1 = fig1.add_subplot(111)
@@ -486,6 +528,7 @@ def main():
     ax4 = fig4.add_subplot(111)
     ax5 = fig5.add_subplot(111)
     ax6 = fig6.add_subplot(111)
+    ax7 = fig7.add_subplot(111)
 
     ax1.set_facecolor('#161b22')
     ax1.set_title('三軸加速度', fontsize=14, fontweight='bold',
@@ -594,6 +637,32 @@ def main():
     ax6.set_ylim(-1, 1)
     ax6.axhline(y=0, color='gray', linestyle='-', linewidth=0.7, alpha=0.3)
     fig6.tight_layout()
+
+    # 聲譜圖設定
+    ax7.set_facecolor('#161b22')
+    ax7.set_title('聲譜圖 (Spectrogram)', fontsize=14,
+                  fontweight='bold', color='#58a6ff', pad=12)
+    ax7.set_xlabel('時間 (秒)', fontsize=11)
+    ax7.set_ylabel('頻率 (Hz)', fontsize=11)
+
+    # 初始化聲譜圖（稍後在 update 中更新）
+    spectrogram_data = np.zeros((129, 100))  # 初始空白聲譜圖
+    spectrogram_image = ax7.imshow(
+        spectrogram_data,
+        aspect='auto',
+        origin='lower',
+        cmap='jet',  # 藍色到紅色
+        vmin=SPEC_POWER_MIN,
+        vmax=SPEC_POWER_MAX,
+        extent=[0, DATA_WINDOW_LENGTH, 0, 25]
+    )
+
+    # 添加色條
+    cbar = fig7.colorbar(spectrogram_image, ax=ax7, pad=0.01)
+    cbar.set_label('功率 (dB)', fontsize=10, color='white')
+    cbar.ax.tick_params(labelsize=9, colors='white')
+
+    fig7.tight_layout()
 
     print("\n開始接收資料...\n")
 
