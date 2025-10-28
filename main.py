@@ -63,10 +63,13 @@ FFT_PSD_SCALE = 1.0 / (FFT_FS * FFT_N)
 N_HALF_PLUS_ONE = FFT_N // 2 + 1
 
 # 聲譜圖參數
-SPEC_NPERSEG = 128     # FFT 窗口大小：128 樣本 = 2.56 秒
-SPEC_NOVERLAP = 85     # 重疊樣本數：85/128 = 66.4% 重疊，時間步進 = 0.86 秒
-SPEC_POWER_MIN = -45   # dB 色標最小值
-SPEC_POWER_MAX = 0     # dB 色標最大值
+SPEC_NPERSEG = 50           # FFT 窗口大小：128 樣本 = 2.56 秒
+SPEC_NOVERLAP = 50*0.85     # 重疊樣本數：85/128 = 66.4% 重疊，時間步進 = 0.86 秒
+SPEC_FREQ_MAX = 25          # Hz 顯示的最大頻率（0-10 Hz）
+SPEC_POWER_MIN = -40        # dB 色標最小值
+SPEC_POWER_MAX = 0          # dB 色標最大值
+# 如果太藍：調小 SPEC_POWER_MIN（例如 -50）
+# 如果太紅：調大 SPEC_POWER_MAX（例如 10）
 
 
 def compute_psd_db(fft_data):
@@ -376,35 +379,38 @@ def update_plot(frame):
 
             _last_fft_update_time = current_time
 
-        # 更新聲譜圖（使用最近 5 秒的數據）- 獨立於 FFT 更新
-        if should_update_fft and data_len >= SPEC_NPERSEG:
-            # 使用所有當前窗口的數據（DATA_WINDOW_LENGTH）
-            z_for_spec = np.array(z_list, dtype=np.float32)
-            spec_x_min = time_list[0] if len(time_list) > 0 else 0
-            spec_x_max = time_list[-1] if len(
-                time_list) > 0 else DATA_WINDOW_LENGTH
+        # 更新聲譜圖 - 使用濾波後的 X 軸數據（h1）
+        if should_update_fft and len(h1_data) >= SPEC_NPERSEG:
+            # 使用濾波後的 X 軸數據
+            h1_for_spec = np.array(list(h1_data), dtype=np.float32)
+            filtered_time_list = list(filtered_time)
+            spec_x_min = filtered_time_list[0] if len(
+                filtered_time_list) > 0 else 0
+            spec_x_max = filtered_time_list[-1] if len(
+                filtered_time_list) > 0 else DATA_WINDOW_LENGTH
 
             # 計算 STFT
             freqs, times, Sxx = signal.spectrogram(
-                z_for_spec,
+                h1_for_spec,
                 fs=FFT_FS,
                 nperseg=SPEC_NPERSEG,
                 noverlap=SPEC_NOVERLAP,
-                window='hann',  # 使用 'hann' 而不是 'hanning'
+                window='hann',
                 scaling='density'
             )
 
             # 轉換為 dB
             Sxx_db = 10 * np.log10(Sxx + 1e-20)
 
-            # 只顯示 0-25 Hz
-            freq_mask = freqs <= 25
+            # 只顯示 0-10 Hz
+            freq_mask = freqs <= SPEC_FREQ_MAX
             freqs_plot = freqs[freq_mask]
             Sxx_plot = Sxx_db[freq_mask, :]
 
             # 更新圖像
             spectrogram_image.set_data(Sxx_plot)
-            spectrogram_image.set_extent([spec_x_min, spec_x_max, 0, 25])
+            spectrogram_image.set_extent(
+                [spec_x_min, spec_x_max, 0, SPEC_FREQ_MAX])
 
             # 固定色標範圍（-40 到 0 dB）
             spectrogram_image.set_clim(
@@ -640,7 +646,7 @@ def main():
 
     # 聲譜圖設定
     ax7.set_facecolor('#161b22')
-    ax7.set_title('聲譜圖 (Spectrogram)', fontsize=14,
+    ax7.set_title('聲譜圖 (Spectrogram) - X軸濾波', fontsize=14,
                   fontweight='bold', color='#58a6ff', pad=12)
     ax7.set_xlabel('時間 (秒)', fontsize=11)
     ax7.set_ylabel('頻率 (Hz)', fontsize=11)
@@ -654,7 +660,7 @@ def main():
         cmap='jet',  # 藍色到紅色
         vmin=SPEC_POWER_MIN,
         vmax=SPEC_POWER_MAX,
-        extent=[0, DATA_WINDOW_LENGTH, 0, 25]
+        extent=[0, DATA_WINDOW_LENGTH, 0, SPEC_FREQ_MAX]
     )
 
     # 添加色條
