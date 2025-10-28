@@ -294,11 +294,21 @@ def collecting_thread(ser_ref, conn, port_name):
 
             # 批次處理封包
             results_processed = 0
+            timestamp_start = get_timestamp_utc8()  # 13 位毫秒時間戳
+            start = 0
             for _ in range(20):
                 result = parse_serial_data(current_ser)
                 if result is None:
                     break
 
+                # 如果 timestamp 為 0，使用計算的時間（每筆間隔 20ms）
+                if result[1] == 0:
+                    result = (result[0], timestamp_start +
+                              (start * 20), *result[2:])
+                    start += 1
+
+                if result[0] == 'sensor':
+                    print(result[1])
                 # 分類存入緩衝區
                 data_type = result[0]
                 if data_type == 'sensor':
@@ -312,6 +322,7 @@ def collecting_thread(ser_ref, conn, port_name):
                 last_data_time = time.time()
                 reconnect_count = 0
 
+            print("---")
             # 寫入資料庫
             current_time = time.time()
             should_write = (current_time - last_write_time >= WRITE_INTERVAL or
@@ -325,10 +336,6 @@ def collecting_thread(ser_ref, conn, port_name):
                     conn, 'filtered', filtered_buffer)
                 wrote_intensity = write_to_database(
                     conn, 'intensity', intensity_buffer)
-
-                if wrote_sensor > 0 or wrote_filtered > 0 or wrote_intensity > 0:
-                    print(
-                        f"[寫入] Sensor:{wrote_sensor} Filtered:{wrote_filtered} Intensity:{wrote_intensity}")
 
                 sensor_buffer.clear()
                 filtered_buffer.clear()

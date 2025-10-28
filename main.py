@@ -338,6 +338,14 @@ def update_plot(frame):
             line_z.set_data(time_list, z_list)
             ax1.set_xlim(x_min, x_max)
 
+            all_values = x_list + y_list + z_list
+            if all_values:
+                y_min = min(all_values)
+                y_max = max(all_values)
+                y_range = y_max - y_min
+                padding = y_range * 0.15 if y_range > 0 else 1
+                ax1.set_ylim(y_min - padding, y_max + padding)
+
         if should_update_fft and data_len >= FFT_SIZE:
             x_arr = np.array(x_list[-FFT_SIZE:], dtype=np.float32)
             y_arr = np.array(y_list[-FFT_SIZE:], dtype=np.float32)
@@ -397,6 +405,15 @@ def update_plot(frame):
             line_h2.set_data(filtered_time_list, h2_list)
             line_v.set_data(filtered_time_list, v_list)
             ax6.set_xlim(x_min, x_max)
+
+            all_filtered_values = h1_list + h2_list + v_list
+            if all_filtered_values:
+                y_min_filt = min(all_filtered_values)
+                y_max_filt = max(all_filtered_values)
+                y_range_filt = y_max_filt - y_min_filt
+                padding_filt = y_range_filt * 0.15 if y_range_filt > 0 else 1
+                ax6.set_ylim(y_min_filt - padding_filt,
+                             y_max_filt + padding_filt)
 
     for fig in [fig1, fig3, fig4, fig5, fig6]:
         fig.canvas.draw_idle()
