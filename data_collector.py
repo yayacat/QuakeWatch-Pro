@@ -12,13 +12,12 @@ import sqlite3
 import signal
 from datetime import datetime, timezone, timedelta
 from threading import Thread, Event
-from collections import defaultdict
+
 
 BAUD_RATE = 115200
 DB_FILE = 'earthquake_data.db'
 
 packet_count = {'sensor': 0, 'intensity': 0, 'filtered': 0, 'error': 0}
-error_details = defaultdict(int)  # 詳細錯誤統計
 collecting_active = Event()
 collecting_active.set()
 
@@ -93,13 +92,11 @@ def parse_serial_data(ser):
     try:
         header = ser.read(1)
         if len(header) != 1:
-            error_details['header_timeout'] += 1
             return None
 
         header_byte = header[0]
 
         if header_byte not in [0x53, 0x49, 0x46]:
-            error_details[f'invalid_header_0x{header_byte:02X}'] += 1
             packet_count['error'] += 1
             return None
 
@@ -107,7 +104,6 @@ def parse_serial_data(ser):
         if header_byte == 0x53:
             data_plus_checksum = ser.read(21)
             if len(data_plus_checksum) != 21:
-                error_details['sensor_incomplete'] += 1
                 packet_count['error'] += 1
                 return None
 
@@ -119,7 +115,6 @@ def parse_serial_data(ser):
                 calculated_xor ^= byte
 
             if calculated_xor != 0:
-                error_details['sensor_checksum_fail'] += 1
                 packet_count['error'] += 1
                 return None
 
@@ -131,7 +126,6 @@ def parse_serial_data(ser):
         elif header_byte == 0x49:
             data_plus_checksum = ser.read(17)
             if len(data_plus_checksum) != 17:
-                error_details['intensity_incomplete'] += 1
                 packet_count['error'] += 1
                 return None
 
@@ -143,7 +137,6 @@ def parse_serial_data(ser):
                 calculated_xor ^= byte
 
             if calculated_xor != 0:
-                error_details['intensity_checksum_fail'] += 1
                 packet_count['error'] += 1
                 return None
 
@@ -157,11 +150,8 @@ def parse_serial_data(ser):
         elif header_byte == 0x46:
             data_plus_checksum = ser.read(21)
             if len(data_plus_checksum) != 21:
-                error_details['filtered_incomplete'] += 1
                 packet_count['error'] += 1
                 # 診斷: 顯示實際讀取的長度
-                if len(data_plus_checksum) > 0:
-                    error_details[f'filtered_len_{len(data_plus_checksum)}'] += 1
                 return None
 
             data = data_plus_checksum[:20]
@@ -172,16 +162,7 @@ def parse_serial_data(ser):
                 calculated_xor ^= byte
 
             if calculated_xor != 0:
-                error_details['filtered_checksum_fail'] += 1
                 packet_count['error'] += 1
-                # 診斷: 顯示前幾個 bytes
-                if error_details['filtered_checksum_fail'] <= 5:
-                    print(f"[DEBUG] Filtered checksum 失敗:")
-                    print(f"  Header: 0x{header_byte:02X}")
-                    print(
-                        f"  Data[:8]: {' '.join(f'{b:02X}' for b in data[:8])}")
-                    print(
-                        f"  Checksum: 0x{checksum:02X}, Calc: 0x{calculated_xor:02X}")
                 return None
 
             timestamp, x, y, z = struct.unpack('<Qfff', data)
@@ -189,7 +170,6 @@ def parse_serial_data(ser):
             return ('filtered', timestamp, x, y, z)
 
     except Exception as e:
-        error_details[f'exception_{type(e).__name__}'] += 1
         packet_count['error'] += 1
         if packet_count['error'] % 100 == 0:
             print(f"解析錯誤: {e}")
@@ -274,7 +254,6 @@ def collecting_thread(ser_ref, conn, port_name):
     last_report_time = time.time()
     last_write_time = time.time()
     last_data_time = time.time()
-    last_diagnostic_time = time.time()
     reconnect_count = 0
 
     # 緩衝區設定 - 使用延遲寫入策略
@@ -417,15 +396,6 @@ def collecting_thread(ser_ref, conn, port_name):
                   f"錯誤:{packet_count['error']}")
             last_report_time = current_time
 
-        # 每 15 秒顯示詳細錯誤診斷
-        if current_time - last_diagnostic_time >= 15.0:
-            if error_details:
-                print("\n=== 錯誤診斷 ===")
-                for error_type, count in sorted(error_details.items(), key=lambda x: x[1], reverse=True):
-                    print(f"  {error_type}: {count}")
-                print("================\n")
-            last_diagnostic_time = current_time
-
     # 寫入剩餘資料
     write_to_database(conn, 'sensor', sensor_buffer)
     write_to_database(conn, 'filtered', filtered_buffer)
@@ -468,7 +438,6 @@ def main():
     collector.start()
 
     print("開始收集數據... (按 Ctrl+C 停止)")
-    print("提示: 將每 15 秒顯示詳細錯誤統計\n")
 
     try:
         while collecting_active.is_set():
@@ -490,11 +459,6 @@ def main():
     print(f"濾波三軸封包: {packet_count['filtered']}")
     print(f"震度封包: {packet_count['intensity']}")
     print(f"錯誤封包: {packet_count['error']}")
-
-    if error_details:
-        print("\n=== 最終錯誤統計 ===")
-        for error_type, count in sorted(error_details.items(), key=lambda x: x[1], reverse=True):
-            print(f"  {error_type}: {count}")
 
     print("="*60)
     print("數據已保存到:", DB_FILE)
