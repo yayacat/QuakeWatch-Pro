@@ -16,7 +16,7 @@ from scipy import signal
 
 DB_FILE = 'earthquake_data.db'
 TZ_UTC_8 = timezone(timedelta(hours=8))
-DATA_WINDOW_LENGTH = 60
+DATA_WINDOW_LENGTH = 300
 MAX_SAMPLES_SENSOR = int(DATA_WINDOW_LENGTH * 50 * 1.2)
 MAX_SAMPLES_INTENSITY = int(DATA_WINDOW_LENGTH * 2 * 1.2)
 
@@ -64,8 +64,8 @@ N_HALF_PLUS_ONE = FFT_N // 2 + 1
 
 # 聲譜圖參數
 SPEC_NPERSEG = 50           # FFT 窗口大小：128 樣本 = 2.56 秒
-SPEC_NOVERLAP = 50*0.85     # 重疊樣本數：85/128 = 66.4% 重疊，時間步進 = 0.86 秒
-SPEC_FREQ_MAX = 25          # Hz 顯示的最大頻率（0-10 Hz）
+SPEC_NOVERLAP = 50*0.93     # 重疊樣本數：85/128 = 66.4% 重疊，時間步進 = 0.86 秒
+SPEC_FREQ_MAX = 10          # Hz 顯示的最大頻率（0-10 Hz）
 SPEC_POWER_MIN = -40        # dB 色標最小值
 SPEC_POWER_MAX = 0          # dB 色標最大值
 # 如果太藍：調小 SPEC_POWER_MIN（例如 -50）
