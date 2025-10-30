@@ -251,7 +251,7 @@ def select_serial_port():
 def collecting_thread(ser_ref, conn, port_name):
     """資料收集線程"""
     start_time = time.time()
-    last_report_time = time.time()
+    last_report_time = 0
     last_write_time = time.time()
     last_data_time = time.time()
     reconnect_count = 0
@@ -379,7 +379,7 @@ def collecting_thread(ser_ref, conn, port_name):
 
         # 定期統計
         current_time = time.time()
-        if current_time - last_report_time >= 5.0:
+        if current_time - last_report_time >= 600 or last_report_time == 0:
             elapsed = current_time - start_time
             sensor_rate = packet_count['sensor'] / \
                 elapsed if elapsed > 0 else 0
