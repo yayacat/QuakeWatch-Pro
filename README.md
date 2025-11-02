@@ -1,20 +1,4 @@
-# QuakeWatch - ES-Net 地震監測系統
-
-## 功能概述
-
-此系統分為兩個獨立程序：
-
-1. **data_collector.py** - 數據收集器
-
-   - 從 ESP32 接收串列埠數據
-   - 執行 XOR 校驗
-   - 將數據存入 SQLite 數據庫
-
-2. **visualization.py** - 數據視覺化
-   - 從 SQLite 數據庫讀取數據
-   - 顯示 5 個實時圖表
-   - 應用 JMA 濾波器
-   - 進行 FFT 頻譜分析
+# QuakeWatch
 
 ## 安裝
 
@@ -44,16 +28,8 @@ python3 data_collector.py
 在終端 2 運行視覺化程序：
 
 ```bash
-python3 visualization.py
+python3 main.py
 ```
-
-將顯示 5 個實時圖表：
-
-- 圖表 1: 三軸加速度
-- 圖表 2: 三軸濾波後加速度
-- 圖表 3: 三軸頻譜（未濾波）
-- 圖表 4: 三軸頻譜（濾波後）
-- 圖表 5: PGA + 計測震度
 
 ## 數據格式
 
@@ -96,38 +72,3 @@ SELECT * FROM intensity_data ORDER BY received_time DESC LIMIT 10;
 SELECT COUNT(*) FROM sensor_data;
 SELECT COUNT(*) FROM intensity_data;
 ```
-
-## 優化特性
-
-- **降低 FFT 計算頻率**: 每 300ms 更新一次（而非每 50ms）
-- **批量數據更新**: 使用 deque.extend() 提高效率
-- **float32 優化**: 節省 50% 記憶體使用
-- **位運算優化**: 快速計算 2 的冪次方
-- **數據庫索引**: 加快查詢速度
-
-## 故障排除
-
-### 找不到串列埠
-
-- 檢查 ESP32 是否正確連接
-- 檢查系統識別了哪個串列埠
-
-### 數據庫文件不存在
-
-- 先運行 `data_collector.py` 創建數據庫
-
-### 圖表不更新
-
-- 確認 `data_collector.py` 正在運行
-- 檢查是否有數據寫入數據庫
-
-## 系統要求
-
-- Python 3.8+
-- macOS/Linux/Windows
-- 可用的串列埠
-- 3GB RAM（推薦）
-
-## 授權
-
-MIT License
