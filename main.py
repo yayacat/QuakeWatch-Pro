@@ -14,10 +14,18 @@ from collections import deque
 from datetime import datetime, timezone, timedelta
 from scipy import signal
 
-# Windows 中文字體設定
+# 中文字體設定
 import matplotlib
-matplotlib.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'Microsoft YaHei', 'SimHei']
-matplotlib.rcParams['axes.unicode_minus'] = False
+if sys.platform.startswith('win'):
+    # Windows 中文字體設定
+    matplotlib.rcParams['font.sans-serif'] = ['Microsoft JhengHei',
+                                              'Microsoft YaHei', 'SimHei']
+    matplotlib.rcParams['axes.unicode_minus'] = False
+elif sys.platform == 'darwin':
+    # macOS 中文字體設定
+    matplotlib.rcParams['font.sans-serif'] = ['PingFang SC', 'Arial Unicode MS',
+                                              'Hiragino Sans GB', 'STHeiti']
+    matplotlib.rcParams['axes.unicode_minus'] = False
 
 DB_FILE = 'earthquake_data.db'
 TZ_UTC_8 = timezone(timedelta(hours=8))
