@@ -7,6 +7,7 @@ import serial
 import serial.tools.list_ports
 import struct
 import sys
+import os
 import time
 import sqlite3
 import signal
@@ -86,6 +87,13 @@ def read_exact_bytes(ser, num_bytes, timeout_ms=100):
     """
     Windows 相容: 精確讀取指定 bytes
     """
+    if os.name != 'nt':  # macOS / Linux - 使用直接讀取
+        data = ser.read(num_bytes)
+        if len(data) != num_bytes:
+            return None
+        return data
+
+    # Windows - 使用循環讀取
     data = bytearray()
     start_time = time.time()
     timeout_sec = timeout_ms / 1000.0
@@ -391,22 +399,25 @@ def collecting_thread(ser_ref, conn, port_name):
 
             time.sleep(2.0)
             try:
-                # 重連時也使用被動模式
-                s = serial.Serial()
-                s.port = port_name
-                s.baudrate = BAUD_RATE
-                s.timeout = 0.05
-                s.xonxoff = False
-                s.rtscts = False
-                s.dsrdtr = False
-                s.dtr = False
-                s.rts = False
-                s.open()
+                if os.name == 'nt':  # Windows - 使用防重啟配置
+                    s = serial.Serial()
+                    s.port = port_name
+                    s.baudrate = BAUD_RATE
+                    s.timeout = 0.05
+                    s.xonxoff = False
+                    s.rtscts = False
+                    s.dsrdtr = False
+                    s.dtr = False
+                    s.rts = False
+                    s.open()
 
-                time.sleep(0.1)
-                s.reset_input_buffer()
-                s.reset_output_buffer()
-                ser_ref['ser'] = s
+                    time.sleep(0.1)
+                    s.reset_input_buffer()
+                    s.reset_output_buffer()
+                    ser_ref['ser'] = s
+                else:  # macOS / Linux - 使用簡單配置
+                    ser_ref['ser'] = serial.Serial(port_name, BAUD_RATE, timeout=1)
+
                 print(f"[重連成功] {port_name}")
                 last_data_time = time.time()
             except serial.SerialException as re:
@@ -459,21 +470,23 @@ def main():
         sys.exit(0)
 
     try:
-        # 正確做法: 先配置再打開,避免 DTR/RTS 觸發重啟
-        ser = serial.Serial()
-        ser.port = selected_port
-        ser.baudrate = BAUD_RATE
-        ser.timeout = 0.05
-        ser.xonxoff = False
-        ser.rtscts = False
-        ser.dsrdtr = False
-        ser.dtr = False  # 在打開前設定為 False
-        ser.rts = False
-        ser.open()
+        if os.name == 'nt':  # Windows - 使用防重啟配置
+            ser = serial.Serial()
+            ser.port = selected_port
+            ser.baudrate = BAUD_RATE
+            ser.timeout = 0.05
+            ser.xonxoff = False
+            ser.rtscts = False
+            ser.dsrdtr = False
+            ser.dtr = False  # 在打開前設定為 False
+            ser.rts = False
+            ser.open()
 
-        time.sleep(0.1)
-        ser.reset_input_buffer()
-        ser.reset_output_buffer()
+            time.sleep(0.1)
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+        else:  # macOS / Linux - 使用簡單配置
+            ser = serial.Serial(selected_port, BAUD_RATE, timeout=1)
 
         print(f"\n✓ 已連接: {selected_port} @ {BAUD_RATE} baud")
     except serial.SerialException as e:
