@@ -1,18 +1,20 @@
 """
 QuakeWatch - ES-Net Data Visualization
-地震 ESP32 資料視覺化 - 從 SQLite 讀取數據並顯示圖表
+地震 ESP32 資料視覺化 - 從 WebSocket 接收數據並顯示圖表
 """
 
-import sqlite3
 import sys
 import time
 import threading
+import json
+import asyncio
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from scipy import signal
+from websockets.client import connect
 
 # 中文字體設定
 import matplotlib
@@ -27,9 +29,9 @@ elif sys.platform == 'darwin':
                                               'Hiragino Sans GB', 'STHeiti']
     matplotlib.rcParams['axes.unicode_minus'] = False
 
-DB_FILE = 'earthquake_data.db'
+WEBSOCKET_URL = 'ws://localhost:8765'
 TZ_UTC_8 = timezone(timedelta(hours=8))
-DATA_WINDOW_LENGTH = 60
+DATA_WINDOW_LENGTH = 10
 MAX_SAMPLES_SENSOR = int(DATA_WINDOW_LENGTH * 50 * 1.2)
 MAX_SAMPLES_INTENSITY = int(DATA_WINDOW_LENGTH * 2 * 1.2)
 
@@ -149,168 +151,140 @@ def clean_old_data():
                 filtered_timestamp.popleft()
 
 
-def parsing_thread():
-    """獨立的資料解析線程 - 從 SQLite 讀取數據"""
+async def websocket_receiver():
+    """WebSocket 接收線程 - 從 data_collector 接收數據"""
     global first_timestamp, first_received_time
 
     first_received_time = None
 
-    print(f"[解析線程] 已啟動 (時間窗口: {DATA_WINDOW_LENGTH} 秒)\n")
-    report_interval = 1.0
-    clean_interval = 2.0
-    last_clean_time = time.time()
-    last_rx_sensor = None
-    last_rx_intensity = None
-    last_rx_filtered = None
+    print(f"[WebSocket] 正在連線到 {WEBSOCKET_URL}...\n")
 
     while parsing_active.is_set():
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-        cursor = conn.cursor()
-
         try:
-            cutoff_time = time.time() - 60
+            async with connect(WEBSOCKET_URL) as websocket:
+                print(f"[WebSocket] 已連線\n")
 
-            if last_rx_sensor is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? ORDER BY timestamp_ms ASC',
-                    (cutoff_time,))
-                sensor_rows = cursor.fetchall()
-                if sensor_rows:
-                    last_rx_sensor = sensor_rows[-1][4]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > ? AND received_time > ? ORDER BY timestamp_ms ASC',
-                    (max(last_rx_sensor, cutoff_time), cutoff_time))
-                sensor_rows = cursor.fetchall()
+                while parsing_active.is_set():
+                    try:
+                        message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                        data = json.loads(message)
+                        data_type = data['type']
+                        items = data['data']
 
-            if sensor_rows:
-                with data_lock:
-                    for row in sensor_rows:
-                        timestamp, x, y, z, received_time = row
-                        last_rx_sensor = received_time
+                        received_time = time.time()
                         if first_received_time is None:
                             first_received_time = received_time
 
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
+                        with data_lock:
+                            if data_type == 'sensor':
+                                for item in items:
+                                    timestamp, x, y, z = item
 
-                        x_data.append(x)
-                        y_data.append(y)
-                        z_data.append(z)
+                                    if timestamp >= 1000000000000:
+                                        if first_timestamp is None or timestamp < first_timestamp:
+                                            first_timestamp = timestamp
 
-                        # 即時計算 PGA
-                        pga_value = np.sqrt(x**2 + y**2 + z**2)
-                        pga_raw.append(pga_value)
+                                    x_data.append(x)
+                                    y_data.append(y)
+                                    z_data.append(z)
 
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time = received_time - first_received_time
+                                    pga_value = np.sqrt(x**2 + y**2 + z**2)
+                                    pga_raw.append(pga_value)
 
-                        time_data.append(adjusted_time)
-                        timestamp_data.append(timestamp)
-                        parse_stats['total_parsed'] += 1
+                                    if timestamp >= 1000000000000 and first_timestamp is not None:
+                                        adjusted_time = (
+                                            timestamp - first_timestamp) / 1000.0
+                                    else:
+                                        adjusted_time = received_time - first_received_time
 
-            if last_rx_intensity is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE received_time > ? ORDER BY received_time ASC',
-                    (cutoff_time,))
-                intensity_rows = cursor.fetchall()
-                if intensity_rows:
-                    last_rx_intensity = intensity_rows[-1][3]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE received_time > ? AND received_time > ? ORDER BY received_time ASC',
-                    (max(last_rx_intensity, cutoff_time), cutoff_time))
-                intensity_rows = cursor.fetchall()
+                                    time_data.append(adjusted_time)
+                                    timestamp_data.append(timestamp)
+                                    parse_stats['total_parsed'] += 1
 
-            if intensity_rows:
-                with data_lock:
-                    for row in intensity_rows:
-                        timestamp, intensity, a, received_time = row
-                        last_rx_intensity = received_time
-                        if first_received_time is None:
-                            first_received_time = received_time
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
-                        intensity_history.append(intensity)
-                        a_history.append(a)
+                            elif data_type == 'filtered':
+                                for item in items:
+                                    timestamp, h1, h2, v = item
 
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time_int = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time_int = received_time - first_received_time
+                                    if timestamp >= 1000000000000:
+                                        if first_timestamp is None or timestamp < first_timestamp:
+                                            first_timestamp = timestamp
 
-                        intensity_time.append(adjusted_time_int)
-                        intensity_timestamp.append(timestamp)
-                        parse_stats['total_parsed'] += 1
+                                    h1_data.append(h1)
+                                    h2_data.append(h2)
+                                    v_data.append(v)
 
-            if last_rx_filtered is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? ORDER BY timestamp_ms ASC',
-                    (cutoff_time,))
-                filtered_rows = cursor.fetchall()
-                if filtered_rows:
-                    last_rx_filtered = filtered_rows[-1][4]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > ? AND received_time > ? ORDER BY timestamp_ms ASC',
-                    (max(last_rx_filtered, cutoff_time), cutoff_time))
-                filtered_rows = cursor.fetchall()
+                                    if timestamp >= 1000000000000 and first_timestamp is not None:
+                                        adjusted_time_filt = (
+                                            timestamp - first_timestamp) / 1000.0
+                                    else:
+                                        adjusted_time_filt = received_time - first_received_time
 
-            if filtered_rows:
-                with data_lock:
-                    for row in filtered_rows:
-                        timestamp, h1, h2, v, received_time = row
-                        last_rx_filtered = received_time
-                        if first_received_time is None:
-                            first_received_time = received_time
+                                    filtered_time.append(adjusted_time_filt)
+                                    filtered_timestamp.append(timestamp)
+                                    parse_stats['total_parsed'] += 1
 
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
+                            elif data_type == 'intensity':
+                                for item in items:
+                                    timestamp, intensity, a = item
 
-                        h1_data.append(h1)
-                        h2_data.append(h2)
-                        v_data.append(v)
+                                    if timestamp >= 1000000000000:
+                                        if first_timestamp is None or timestamp < first_timestamp:
+                                            first_timestamp = timestamp
 
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time_filt = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time_filt = received_time - first_received_time
+                                    intensity_history.append(intensity)
+                                    a_history.append(a)
 
-                        filtered_time.append(adjusted_time_filt)
-                        filtered_timestamp.append(timestamp)
-                        parse_stats['total_parsed'] += 1
+                                    if timestamp >= 1000000000000 and first_timestamp is not None:
+                                        adjusted_time_int = (
+                                            timestamp - first_timestamp) / 1000.0
+                                    else:
+                                        adjusted_time_int = received_time - first_received_time
 
-            conn.close()
+                                    intensity_time.append(adjusted_time_int)
+                                    intensity_timestamp.append(timestamp)
+                                    parse_stats['total_parsed'] += 1
+
+                    except asyncio.TimeoutError:
+                        continue
+                    except Exception as e:
+                        print(f"[WebSocket] 接收錯誤: {e}")
+                        break
 
         except Exception as e:
-            if conn:
-                conn.close()
+            print(f"[WebSocket] 連線失敗: {e}")
+            if parsing_active.is_set():
+                print("[WebSocket] 5秒後重新連線...")
+                await asyncio.sleep(5)
+            else:
+                break
 
-        time.sleep(0.1)
+    print("[WebSocket] 已停止")
 
-        current_check_time = time.time()
-        if current_check_time - last_clean_time >= clean_interval:
+
+def parsing_thread():
+    """包裝 asyncio WebSocket 接收器"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    # 定期清理舊資料
+    async def clean_old_data_periodically():
+        clean_interval = 2.0
+        while parsing_active.is_set():
+            await asyncio.sleep(clean_interval)
             with data_lock:
                 clean_old_data()
-            last_clean_time = current_check_time
 
-        if current_check_time - parse_stats['last_report_time'] >= report_interval:
-            with data_lock:
-                parsed_count = parse_stats['total_parsed'] - \
-                    parse_stats['last_report_count']
-                rate = parsed_count / report_interval
-                time_span = time_data[-1] - \
-                    time_data[0] if len(time_data) > 1 else 0
+    # 同時執行 WebSocket 接收和定期清理
+    async def run_both():
+        await asyncio.gather(
+            websocket_receiver(),
+            clean_old_data_periodically()
+        )
 
-    print("[解析線程] 已停止")
+    try:
+        loop.run_until_complete(run_both())
+    finally:
+        loop.close()
 
 
 _last_fft_update_time = 0
@@ -515,14 +489,8 @@ def main():
 
     print("QuakeWatch - ES-Net Data Visualization")
     print("="*60)
-
-    import os
-    if not os.path.exists(DB_FILE):
-        print(f"\n✗ 錯誤: 找不到數據庫文件 {DB_FILE}")
-        print("請先運行 python3 data_collector.py 收集數據")
-        sys.exit(1)
-
-    print(f"\n✓ 數據庫文件: {DB_FILE}")
+    print(f"\n✓ WebSocket URL: {WEBSOCKET_URL}")
+    print("提示: 請先運行 python3 data_collector.py 啟動資料收集器")
 
     # 字體已在檔案開頭設定,這裡只設定樣式
     plt.style.use('dark_background')

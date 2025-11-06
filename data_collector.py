@@ -11,12 +11,16 @@ import os
 import time
 import sqlite3
 import signal
+import json
+import asyncio
 from datetime import datetime, timezone, timedelta
 from threading import Thread, Event
+from websockets.server import serve
 
 
 BAUD_RATE = 115200
 DB_FILE = 'earthquake_data.db'
+WEBSOCKET_PORT = 8765
 
 packet_count = {'sensor': 0, 'intensity': 0, 'filtered': 0, 'error': 0}
 collecting_active = Event()
@@ -24,12 +28,49 @@ collecting_active.set()
 
 TZ_UTC_8 = timezone(timedelta(hours=8))
 
+# WebSocket 客戶端連線集合
+websocket_clients = set()
+
 
 def get_timestamp_utc8():
     """獲取 UTC+8 時間戳(毫秒)"""
     now_utc8 = datetime.now(TZ_UTC_8)
     epoch = datetime(1970, 1, 1, tzinfo=TZ_UTC_8)
     return int((now_utc8 - epoch).total_seconds() * 1000)
+
+
+async def websocket_handler(websocket):
+    """WebSocket 連線處理"""
+    websocket_clients.add(websocket)
+    print(f"[WebSocket] 新客戶端連線 (總數: {len(websocket_clients)})")
+    try:
+        await websocket.wait_closed()
+    finally:
+        websocket_clients.remove(websocket)
+        print(f"[WebSocket] 客戶端斷線 (總數: {len(websocket_clients)})")
+
+
+async def broadcast_data(data_type, data):
+    """廣播資料到所有 WebSocket 客戶端"""
+    if not websocket_clients:
+        return
+
+    message = json.dumps({
+        'type': data_type,
+        'data': data
+    })
+
+    # 使用 asyncio.gather 並發送給所有客戶端
+    disconnected = set()
+    for client in websocket_clients:
+        try:
+            await client.send(message)
+        except Exception:
+            disconnected.add(client)
+
+    # 移除斷線的客戶端
+    for client in disconnected:
+        websocket_clients.discard(client)
 
 
 def init_database():
@@ -277,7 +318,7 @@ def select_serial_port():
             return None
 
 
-def collecting_thread(ser_ref, conn, port_name):
+def collecting_thread(ser_ref, conn, port_name, loop):
     """資料收集線程"""
     start_time = time.time()
     last_report_time = 0
@@ -286,7 +327,7 @@ def collecting_thread(ser_ref, conn, port_name):
     reconnect_count = 0
 
     # 緩衝區設定 - 使用延遲寫入策略
-    BUFFER_DELAY_MS = 500  # 只寫入 500ms 前的數據，確保晚到的數據能排序
+    BUFFER_DELAY_MS = 500  # 只寫入 500ms 前的數據,確保晚到的數據能排序
     WRITE_INTERVAL = 0.5
     sensor_buffer = []
     filtered_buffer = []
@@ -367,6 +408,23 @@ def collecting_thread(ser_ref, conn, port_name):
                     conn, 'filtered', filtered_to_write)
                 wrote_intensity = write_to_database(
                     conn, 'intensity', intensity_to_write)
+
+                # 廣播資料到 WebSocket 客戶端
+                if sensor_to_write:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast_data('sensor', [[d[1], d[2], d[3], d[4]] for d in sensor_to_write]),
+                        loop
+                    )
+                if filtered_to_write:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast_data('filtered', [[d[1], d[2], d[3], d[4]] for d in filtered_to_write]),
+                        loop
+                    )
+                if intensity_to_write:
+                    asyncio.run_coroutine_threadsafe(
+                        broadcast_data('intensity', [[d[1], d[2], d[3]] for d in intensity_to_write]),
+                        loop
+                    )
 
                 # 保留未寫入的數據（保留在緩衝區中等待後續排序）
                 sensor_buffer = [
@@ -457,6 +515,13 @@ def signal_handler(sig, frame):
     collecting_active.clear()
 
 
+async def start_websocket_server():
+    """啟動 WebSocket 伺服器"""
+    async with serve(websocket_handler, "0.0.0.0", WEBSOCKET_PORT):
+        print(f"✓ WebSocket 伺服器已啟動: ws://0.0.0.0:{WEBSOCKET_PORT}")
+        await asyncio.Future()  # 永久運行
+
+
 def main():
     print("QuakeWatch - ES-Net Serial Data Collector")
     print("="*60)
@@ -496,9 +561,20 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
+    # 建立 asyncio event loop
+    loop = asyncio.new_event_loop()
+
+    # 在背景執行 WebSocket 伺服器
+    def run_asyncio_loop():
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(start_websocket_server())
+
+    websocket_thread = Thread(target=run_asyncio_loop, daemon=True)
+    websocket_thread.start()
+
     ser_ref = {'ser': ser}
     collector = Thread(target=collecting_thread, args=(
-        ser_ref, conn, selected_port), daemon=True)
+        ser_ref, conn, selected_port, loop), daemon=True)
     collector.start()
 
     print("開始收集數據... (按 Ctrl+C 停止)")
@@ -517,6 +593,7 @@ def main():
     except:
         pass
     conn.close()
+    loop.stop()
 
     print("\n" + "="*60)
     print(f"原始三軸封包: {packet_count['sensor']}")
