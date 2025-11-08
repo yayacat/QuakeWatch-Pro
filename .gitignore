@@ -1,3 +1,6 @@
 /venv
 earthquake_data.db-journal
 earthquake_data.db
+.env
+/module/__pycache__
+*.pyc
