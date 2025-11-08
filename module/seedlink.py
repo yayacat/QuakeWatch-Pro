@@ -34,7 +34,7 @@ class DataHttpPoster:
 
         # 緩衝區設定
         WRITE_INTERVAL = 0.0  # 每 0.5 秒寫入一次
-        MAX_BATCH_SIZE = 10  # 或緩衝區達到 10 筆數據時寫入
+        MAX_BATCH_SIZE = 10000  # 或緩衝區達到 10000 筆數據時寫入
         last_write_time = time.time()
 
         sensor_buffer = []
