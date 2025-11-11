@@ -42,12 +42,12 @@ class DataHttpPoster:
         def flush_buffers():
             """寫入所有緩衝區的數據"""
             batched_data = {
-                'SHN': {'data': [], 'timestamp': None},
-                'SHE': {'data': [], 'timestamp': None},
-                'SHZ': {'data': [], 'timestamp': None}
+                'ENN': {'data': [], 'timestamp': None},
+                'ENE': {'data': [], 'timestamp': None},
+                'ENZ': {'data': [], 'timestamp': None}
             }
 
-            SEED_CONFIG = {2: 'SHN', 3: 'SHE', 4: 'SHZ'}
+            SEED_CONFIG = {2: 'ENN', 3: 'ENE', 4: 'ENZ'}
 
             for value in sensor_buffer:
                 timestamp = value[1]
