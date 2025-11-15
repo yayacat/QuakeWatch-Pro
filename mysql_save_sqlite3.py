@@ -155,8 +155,8 @@ def main():
         try:
             o_time_dt_naive = datetime.strptime(args.o_time, '%Y-%m-%dT%H:%M:%S')
             o_time_dt_aware = o_time_dt_naive.replace(tzinfo=tz_utc_8)
-            start_dt_aware = o_time_dt_aware - timedelta(minutes=5)
-            end_dt_aware = o_time_dt_aware + timedelta(minutes=5)
+            start_dt_aware = o_time_dt_aware - timedelta(minutes=args.time)
+            end_dt_aware = o_time_dt_aware + timedelta(minutes=args.time)
             print(f"已提供 o_time，自動設定時間範圍為: {start_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')} to {end_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')}")
         except ValueError:
             parser.error("錯誤的 o_time 格式。請使用 YYYY-MM-DDTHH:MM:SS。")
