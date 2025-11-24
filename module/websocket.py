@@ -19,6 +19,17 @@ class WebSocketServer:
         self.port = port
         self.clients = set()
 
+    def _execute_query(self, query, params):
+        """
+        在背景執行緒中執行資料庫查詢，避免阻塞 asyncio 事件循環。
+        """
+        # 假設 self.db_conn 是執行緒安全的。
+        # 每次查詢都建立一個新的 cursor。
+        cursor = self.db_conn.cursor()
+        cursor.execute(query, params)
+        results = cursor.fetchall()
+        return results if results is not None else []
+
     async def _handler(self, websocket):
         """
         WebSocket 連線處理 - 支援雙向通訊。
@@ -45,13 +56,11 @@ class WebSocketServer:
                             if self.db_conn is None:
                                 raise Exception("資料庫未初始化")
 
-                            cursor = self.db_conn.cursor()
-                            cursor.execute(query, params)
-                            results = cursor.fetchall()
-
-                            # 確保結果是可序列化的
-                            if results is None:
-                                results = []
+                            # 使用 run_in_executor 將同步的資料庫操作移到背景執行緒
+                            loop = asyncio.get_running_loop()
+                            results = await loop.run_in_executor(
+                                None, self._execute_query, query, params
+                            )
 
                             response = {
                                 'type': 'query_response',
