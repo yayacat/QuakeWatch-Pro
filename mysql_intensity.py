@@ -36,6 +36,8 @@ DB_CONFIG = {
 }
 # ------------------------------------
 
+station = os.getenv("station", "ESPRO")
+
 def get_db_connection():
     """建立並返回資料庫連接"""
     try:
@@ -61,7 +63,7 @@ def fetch_data(conn, start_time_ms, end_time_ms, data_type='raw'):
     query = f"""
         SELECT timestamp_ms, {columns}
         FROM {table_name}
-        WHERE timestamp_ms >= %s AND timestamp_ms <= %s
+        WHERE station = %s AND timestamp_ms >= %s AND timestamp_ms <= %s
         ORDER BY timestamp_ms ASC;
     """
     try:
@@ -69,7 +71,7 @@ def fetch_data(conn, start_time_ms, end_time_ms, data_type='raw'):
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
         print(f"執行查詢: {table_name} from {start_time_str} to {end_time_str} (UTC+8)")
-        cursor.execute(query, (start_time_ms, end_time_ms))
+        cursor.execute(query, (station, start_time_ms, end_time_ms))
         results = cursor.fetchall()
         cursor.close()
         print(f"✓ 查詢到 {len(results)} 筆資料")
@@ -162,10 +164,10 @@ def fetch_intensity_data(mysql: mysql_connector, start_time_ms=None, end_time_ms
         # 查詢指定時間範圍內的資料
         query = """
             SELECT * FROM intensity_data
-            WHERE timestamp_ms >= %s AND timestamp_ms <= %s
+            WHERE station = %s AND timestamp_ms >= %s AND timestamp_ms <= %s
             ORDER BY timestamp_ms ASC;
         """
-        params = (start_time_ms, end_time_ms)
+        params = (station, start_time_ms, end_time_ms)
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n執行查詢: intensity_data from {start_time_str} to {end_time_str} (UTC+8)")

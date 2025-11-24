@@ -15,6 +15,9 @@ DB_CONFIG = {
     'password': os.getenv('DB_PASSWORD'),
     'database': os.getenv('DB_DATABASE')
 }
+# ------------------------------------
+
+station = os.getenv("station", "ESPRO")
 
 # --- Table Schemas ---
 TABLES = {
@@ -105,11 +108,11 @@ def transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms):
         query = f"""
             SELECT {mysql_cols_str}
             FROM {table_name}
-            WHERE timestamp_ms >= %s AND timestamp_ms <= %s
+            WHERE station = %s AND timestamp_ms >= %s AND timestamp_ms <= %s
             ORDER BY timestamp_ms ASC;
         """
         try:
-            mysql_cursor.execute(query, (start_time_ms, end_time_ms))
+            mysql_cursor.execute(query, (station, start_time_ms, end_time_ms))
             results = mysql_cursor.fetchall()
             print(f"✓ Fetched {len(results)} rows from MySQL table '{table_name}'.")
         except mysql.connector.Error as err:

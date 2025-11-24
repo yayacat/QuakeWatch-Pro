@@ -8,7 +8,7 @@ from threading import Thread
 from .utils import Utils
 
 class MySQLDatabase:
-    def __init__(self, data_queue, collecting_active):
+    def __init__(self, data_queue, collecting_active, station: str = "ESPRO"):
         load_dotenv()
         self.utils = Utils()
         self.db_config = {
@@ -21,6 +21,7 @@ class MySQLDatabase:
         self.conn = self.connect()
         self.data_queue = data_queue
         self.collecting_active = collecting_active
+        self.station = station
 
     def connect(self):
         """初始化mysql資料庫連接，並檢查/建立mysql資料庫和資料表"""
@@ -49,11 +50,13 @@ class MySQLDatabase:
                 CREATE TABLE IF NOT EXISTS sensor_data (
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     timestamp_ms BIGINT NOT NULL,
+                    station VARCHAR(10) NOT NULL,
                     x FLOAT NOT NULL,
                     y FLOAT NOT NULL,
                     z FLOAT NOT NULL,
                     received_time DOUBLE NOT NULL,
-                    INDEX idx_sensor_timestamp (timestamp_ms)
+                    INDEX idx_sensor_timestamp (timestamp_ms),
+                    INDEX idx_sensor_station (station)
                 ) ENGINE=InnoDB;
             """)
 
@@ -62,10 +65,12 @@ class MySQLDatabase:
                 CREATE TABLE IF NOT EXISTS intensity_data (
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     timestamp_ms BIGINT NOT NULL,
+                    station VARCHAR(10) NOT NULL,
                     intensity FLOAT NOT NULL,
                     a FLOAT NOT NULL,
                     received_time DOUBLE NOT NULL,
-                    INDEX idx_intensity_timestamp (timestamp_ms)
+                    INDEX idx_intensity_timestamp (timestamp_ms),
+                    INDEX idx_intensity_station (station)
                 ) ENGINE=InnoDB;
             """)
 
@@ -74,11 +79,13 @@ class MySQLDatabase:
                 CREATE TABLE IF NOT EXISTS filtered_data (
                     id BIGINT PRIMARY KEY AUTO_INCREMENT,
                     timestamp_ms BIGINT NOT NULL,
+                    station VARCHAR(10) NOT NULL,
                     h1 FLOAT NOT NULL,
                     h2 FLOAT NOT NULL,
                     v FLOAT NOT NULL,
                     received_time DOUBLE NOT NULL,
-                    INDEX idx_filtered_timestamp (timestamp_ms)
+                    INDEX idx_filtered_timestamp (timestamp_ms),
+                    INDEX idx_filtered_station (station)
                 ) ENGINE=InnoDB;
             """)
 
@@ -233,17 +240,16 @@ class MySQLDatabase:
                 # 每次重試都應該獲取新的 cursor，以防 connection 處於不良狀態
                 self.conn.ping(reconnect=True)
                 cursor = self.conn.cursor()
-                received_time = time.time()
 
                 if data_type == 'sensor':
-                    sql = 'INSERT INTO sensor_data (timestamp_ms, x, y, z, received_time) VALUES (%s, %s, %s, %s, %s)'
-                    values = [(d[1], d[2], d[3], d[4], received_time) for d in data_list]
+                    sql = 'INSERT INTO sensor_data (timestamp_ms, station, x, y, z, received_time) VALUES (%s, %s, %s, %s, %s, NOW(6))'
+                    values = [(d[1], self.station, d[2], d[3], d[4]) for d in data_list]
                 elif data_type == 'filtered':
-                    sql = 'INSERT INTO filtered_data (timestamp_ms, h1, h2, v, received_time) VALUES (%s, %s, %s, %s, %s)'
-                    values = [(d[1], d[2], d[3], d[4], received_time) for d in data_list]
+                    sql = 'INSERT INTO filtered_data (timestamp_ms, station, h1, h2, v, received_time) VALUES (%s, %s, %s, %s, %s, NOW(6))'
+                    values = [(d[1], self.station, d[2], d[3], d[4]) for d in data_list]
                 elif data_type == 'intensity':
-                    sql = 'INSERT INTO intensity_data (timestamp_ms, intensity, a, received_time) VALUES (%s, %s, %s, %s)'
-                    values = [(d[1], d[2], d[3], received_time) for d in data_list]
+                    sql = 'INSERT INTO intensity_data (timestamp_ms, station, intensity, a, received_time) VALUES (%s, %s, %s, %s, NOW(6))'
+                    values = [(d[1], self.station, d[2], d[3]) for d in data_list]
                 else:
                     return 0  # 不支持的 data_type
 

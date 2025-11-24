@@ -75,7 +75,7 @@ if __name__ == '__main__':
         print("✓ SQLite3 WebSocket 伺服器已啟動")
 
     if args.mysql:
-        db_mysql = MySQLDatabase(data_queue, collecting_active)
+        db_mysql = MySQLDatabase(data_queue, collecting_active, station=station)
         if db_mysql.conn is None:
             print("無法連接到 MySQL 資料庫，程式結束。")
             if not args.sqlite3 and not args.http:

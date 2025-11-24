@@ -39,6 +39,8 @@ DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_NAME = os.getenv('DB_DATABASE')
 # ------------------------------------
 
+station = os.getenv("station", "ESPRO")
+
 TZ_UTC_8 = timezone(timedelta(hours=8))
 DATA_WINDOW_LENGTH = 60
 MAX_SAMPLES_SENSOR = int(DATA_WINDOW_LENGTH * 50 * 1.2)
@@ -189,15 +191,15 @@ def parsing_thread():
 
             if last_rx_sensor is None:
                 cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > %s ORDER BY timestamp_ms ASC',
-                    (cutoff_time,))
+                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
+                    (station, cutoff_time,))
                 sensor_rows = cursor.fetchall()
                 if sensor_rows:
                     last_rx_sensor = sensor_rows[-1][4]
             else:
                 cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE received_time > %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (max(last_rx_sensor, cutoff_time), cutoff_time))
+                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
+                    (station, max(last_rx_sensor, cutoff_time)))
                 sensor_rows = cursor.fetchall()
 
             if sensor_rows:
@@ -232,15 +234,15 @@ def parsing_thread():
 
             if last_rx_intensity is None:
                 cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE received_time > %s ORDER BY received_time ASC',
-                    (cutoff_time,))
+                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC',
+                    (station, cutoff_time,))
                 intensity_rows = cursor.fetchall()
                 if intensity_rows:
                     last_rx_intensity = intensity_rows[-1][3]
             else:
                 cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE received_time > %s AND received_time > %s ORDER BY received_time ASC',
-                    (max(last_rx_intensity, cutoff_time), cutoff_time))
+                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC',
+                    (station, max(last_rx_intensity, cutoff_time)))
                 intensity_rows = cursor.fetchall()
 
             if intensity_rows:
@@ -268,15 +270,15 @@ def parsing_thread():
 
             if last_rx_filtered is None:
                 cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > %s ORDER BY timestamp_ms ASC',
-                    (cutoff_time,))
+                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
+                    (station, cutoff_time,))
                 filtered_rows = cursor.fetchall()
                 if filtered_rows:
                     last_rx_filtered = filtered_rows[-1][4]
             else:
                 cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE received_time > %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (max(last_rx_filtered, cutoff_time), cutoff_time))
+                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
+                    (station, max(last_rx_filtered, cutoff_time)))
                 filtered_rows = cursor.fetchall()
 
             if filtered_rows:

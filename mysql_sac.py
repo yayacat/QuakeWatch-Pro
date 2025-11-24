@@ -20,6 +20,8 @@ DB_CONFIG = {
 }
 # ------------------------------------
 
+station = os.getenv("station", "ESPRO")
+
 def fetch_data(mysql: mysql_connector, start_time_ms, end_time_ms, data_type='raw', tz_utc_8=timezone(timedelta(hours=8))):
     """從資料庫獲取指定時間範圍內的資料"""
 
@@ -35,15 +37,15 @@ def fetch_data(mysql: mysql_connector, start_time_ms, end_time_ms, data_type='ra
     query = f"""
         SELECT timestamp_ms, {columns}
         FROM {table_name}
-        WHERE timestamp_ms >= %s AND timestamp_ms <= %s
+        WHERE station = %s AND timestamp_ms >= %s AND timestamp_ms <= %s
         ORDER BY timestamp_ms ASC;
     """
     start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
     end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
     print(f"執行查詢: {data_type_name} from {start_time_str} to {end_time_str} (UTC+8)")
-    return mysql.execute_query(query, (start_time_ms, end_time_ms))
+    return mysql.execute_query(query, (station, start_time_ms, end_time_ms))
 
-def export_to_miniseed(sensor_rows, output_file='seismic_data.mseed', station_name='KHH01'):
+def export_to_miniseed(sensor_rows, output_file='seismic_data.mseed', station_name=station):
     """
     匯出為 miniSEED 格式（三軸合併成一個檔案）
     使用 ObsPy 函式庫
@@ -124,7 +126,7 @@ def main():
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-o', '--output', default='seismic_data.mseed', help='輸出的檔案名稱')
     parser.add_argument('-t', '--type', choices=['raw', 'filtered'], default='raw', help='資料類型: raw (原始) 或 filtered (濾波)')
-    parser.add_argument('-s', '--station', default='KHH01', help='測站名稱')
+    parser.add_argument('-s', '--station', default=station, help='測站名稱')
     parser.add_argument('--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
 
     args = parser.parse_args()
