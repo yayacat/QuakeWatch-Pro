@@ -94,6 +94,8 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
+                if not isinstance(timestamp, int) or timestamp == 0:
+                    timestamp = self._get_timestamp_utc8()
                 self.packet_count['sensor'] += 1
                 return ('sensor', timestamp, x, y, z)
 
@@ -116,7 +118,7 @@ class SerialDataCollector:
                     return None
 
                 timestamp, intensity, a = struct.unpack('<Qff', data)
-                if timestamp == 0:
+                if not isinstance(timestamp, int) or timestamp == 0:
                     timestamp = self._get_timestamp_utc8()
                 self.packet_count['intensity'] += 1
                 return ('intensity', timestamp, intensity, a)
@@ -140,6 +142,8 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
+                if not isinstance(timestamp, int) or timestamp == 0:
+                    timestamp = self._get_timestamp_utc8()
                 self.packet_count['filtered'] += 1
                 return ('filtered', timestamp, x, y, z)
 
@@ -161,7 +165,7 @@ class SerialDataCollector:
         print("\n可用串列埠:")
         for i, port in enumerate(ports):
             available_ports.append(port.device)
-            print(f"[{i}] {port.device} - {port.description}")
+            print(f"[{i}] {port.device} - {port.description} (ID: {port.hwid})")
 
         return available_ports
 
