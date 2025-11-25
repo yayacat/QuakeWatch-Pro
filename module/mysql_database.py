@@ -8,7 +8,7 @@ from threading import Thread
 from .utils import Utils
 
 class MySQLDatabase:
-    def __init__(self, data_queue, collecting_active, station: str = "ESPRO"):
+    def __init__(self, data_queue, collecting_active, station: str = "ESPRO", mysql_days_to_keep = 1):
         load_dotenv()
         self.utils = Utils()
         self.db_config = {
@@ -22,6 +22,7 @@ class MySQLDatabase:
         self.data_queue = data_queue
         self.collecting_active = collecting_active
         self.station = station
+        self.mysql_days_to_keep = mysql_days_to_keep
 
     def connect(self):
         """初始化mysql資料庫連接，並檢查/建立mysql資料庫和資料表"""
@@ -171,7 +172,7 @@ class MySQLDatabase:
 
             # --- 定期清理 ---
             if self.is_connected() and (current_time - last_cleanup_time > CLEANUP_INTERVAL):
-                self.cleanup_old_data()
+                self.cleanup_old_data(self.mysql_days_to_keep)
                 last_cleanup_time = current_time
             # ----------------
 
@@ -292,7 +293,7 @@ class MySQLDatabase:
             raise last_exception
         return 0
 
-    def cleanup_old_data(self, retries=3, delay=1):
+    def cleanup_old_data(self, days_to_keep=1, retries=3):
         """清理超過一天的舊資料，帶有重試和批次刪除機制"""
         if not self.is_connected():
             print("[mysql清理] mysql資料庫未連接，跳過清理")
@@ -303,7 +304,7 @@ class MySQLDatabase:
             try:
                 self.conn.ping(reconnect=True)
                 cursor = self.conn.cursor()
-                cleanup_datetime = self.utils.get_now_utc8() - timedelta(days=1)
+                cleanup_datetime = self.utils.get_now_utc8() - timedelta(days=days_to_keep)
                 cleanup_timestamp_ms = int(cleanup_datetime.timestamp() * 1000)
                 cleanup_time_str = cleanup_datetime.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -361,7 +362,7 @@ class MySQLDatabase:
                     except mysql.connector.Error as reconn_err:
                         print(f"[mysql清理] ✗ 重新連接失敗: {reconn_err}")
                         raise last_exception from reconn_err
-                time.sleep(delay)
+                time.sleep(60)  # 等待 60 秒後重試
 
         if last_exception is not None:
             raise last_exception

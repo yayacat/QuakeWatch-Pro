@@ -4,12 +4,13 @@ import queue
 from threading import Thread
 
 class Sqlite3Database:
-    def __init__(self, data_queue, collecting_active, db_file='earthquake_data.db'):
+    def __init__(self, data_queue, collecting_active, db_file='earthquake_data.db', sqlite3_days_to_keep = 1):
         self.db_file = db_file
         self.conn = self._init_database()
         self.conn_client = self._init_database_client()
         self.data_queue = data_queue
         self.collecting_active = collecting_active
+        self.sqlite3_days_to_keep = sqlite3_days_to_keep
 
     def _init_database(self):
         """初始化sqlite3資料庫（啟用 WAL 與最佳化 PRAGMA）"""
@@ -228,7 +229,7 @@ class Sqlite3Database:
 
             # --- 定期清理 ---
             if self.is_connected() and (current_time - last_cleanup_time > CLEANUP_INTERVAL):
-                self.cleanup_old_data()
+                self.cleanup_old_data(self.sqlite3_days_to_keep)
                 last_cleanup_time = current_time
             # ----------------
 

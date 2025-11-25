@@ -45,6 +45,9 @@ if __name__ == '__main__':
     load_dotenv()
     post_url = os.getenv("post_url")
     station = os.getenv("station", "ESPRO")
+    db_file = os.getenv("db_file", "earthquake_data.db")
+    sqlite3_days_to_keep = int(os.getenv("sqlite3_days_to_keep", 1))
+    mysql_days_to_keep = int(os.getenv("mysql_days_to_keep", 1))
 
     utils = Utils()
 
@@ -65,7 +68,7 @@ if __name__ == '__main__':
     db_mysql = None
 
     if args.sqlite3:
-        db = Sqlite3Database(data_queue, collecting_active)
+        db = Sqlite3Database(data_queue, collecting_active, db_file, sqlite3_days_to_keep)
         db_writer_thread = db.start_database_thread()
         threads.append(db_writer_thread)
         print("✓ SQLite3 輸出已啟用")
@@ -75,7 +78,7 @@ if __name__ == '__main__':
         print("✓ SQLite3 WebSocket 伺服器已啟動")
 
     if args.mysql:
-        db_mysql = MySQLDatabase(data_queue, collecting_active, station=station)
+        db_mysql = MySQLDatabase(data_queue, collecting_active, station, mysql_days_to_keep)
         if db_mysql.conn is None:
             print("無法連接到 MySQL 資料庫，程式結束。")
             if not args.sqlite3 and not args.http:
