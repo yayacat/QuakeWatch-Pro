@@ -66,11 +66,6 @@ class SerialDataCollector:
         """
         try:
 
-            # 設定時間戳容許範圍
-            current_time_ms = int(time.time() * 1000)
-            # 允許未來的時間緩衝 (例如: 允許未來 12 小時內的數據，防止時鐘些微誤差，但擋掉誇張的亂數)
-            MAX_TIMESTAMP = current_time_ms + (12 * 60 * 60 * 1000)
-
             header = self._read_exact_bytes(ser, 1, timeout_ms=50)
             if header is None:
                 return None
@@ -100,8 +95,8 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
-                # 檢查時間戳是否有效 (大致判斷是否為毫秒級)
-                if not isinstance(timestamp, int) or timestamp < 1000000000000 or timestamp > MAX_TIMESTAMP:
+                # 檢查時間戳是否為有效的13位毫秒級時間戳
+                if not isinstance(timestamp, int) or not (1000000000000 <= timestamp < 10000000000000):
                     self.packet_count['error'] += 1
                     return None
                 self.packet_count['sensor'] += 1
@@ -126,8 +121,12 @@ class SerialDataCollector:
                     return None
 
                 timestamp, intensity, a = struct.unpack('<Qff', data)
+                # 檢查時間戳是否為有效的13位毫秒級時間戳
                 if timestamp == 0:
                     timestamp = self._get_timestamp_utc8()
+                elif not isinstance(timestamp, int) or not (1000000000000 <= timestamp < 10000000000000):
+                    self.packet_count['error'] += 1
+                    return None
                 self.packet_count['intensity'] += 1
                 return ('intensity', timestamp, intensity, a)
 
@@ -150,8 +149,8 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
-                # 檢查時間戳是否有效 (大致判斷是否為毫秒級)
-                if not isinstance(timestamp, int) or timestamp < 1000000000000 or timestamp > MAX_TIMESTAMP:
+                # 檢查時間戳是否為有效的13位毫秒級時間戳
+                if not isinstance(timestamp, int) or not (1000000000000 <= timestamp < 10000000000000):
                     self.packet_count['error'] += 1
                     return None
                 self.packet_count['filtered'] += 1
