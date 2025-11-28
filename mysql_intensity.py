@@ -48,6 +48,29 @@ def get_db_connection():
         print(f"✗ 資料庫連接錯誤: {err}")
         return None
 
+def format_intensity(intensity_val):
+    """Converts a float intensity value to its JMA string representation."""
+    if intensity_val < 0.5:
+        return "0級"
+    elif intensity_val < 1.5:
+        return "1級"
+    elif intensity_val < 2.5:
+        return "2級"
+    elif intensity_val < 3.5:
+        return "3級"
+    elif intensity_val < 4.5:
+        return "4級"
+    elif intensity_val < 5.0:
+        return "5弱"
+    elif intensity_val < 5.5:
+        return "5強"
+    elif intensity_val < 6.0:
+        return "6弱"
+    elif intensity_val < 6.5:
+        return "6強"
+    else: # >= 6.5
+        return "7級"
+
 def fetch_data(conn, start_time_ms, end_time_ms, data_type='raw'):
     """從資料庫獲取指定時間範圍內的資料"""
     if not conn:
@@ -272,7 +295,7 @@ def intensity_analyze_print(results):
         timestamp_ms = row['timestamp_ms']
 
         # 統計各震度持續時間 (每筆資料代表 1 秒)
-        level = round(intensity, 1)
+        level = format_intensity(intensity)
         intensity_counts[level] = intensity_counts.get(level, 0) + 1
 
         # 找到最大計測震度
@@ -287,13 +310,17 @@ def intensity_analyze_print(results):
 
     print(f"\n--- 地震事件統計 (計測震度 > {filter_intensity:.1f}) ---")
     if intensity_counts:
-        print("各計測震度持續時間:")
-        for level, count in sorted(intensity_counts.items()):
-            print(f"  - 震度 {level} 級: {count} 秒")
+        print("各震度持續時間:")
+        jma_order = ["0級", "1級", "2級", "3級", "4級", "5弱", "5強", "6弱", "6強", "7級"]
+        sorted_levels = sorted(intensity_counts.keys(), key=lambda x: jma_order.index(x) if x in jma_order else len(jma_order))
+        for level in sorted_levels:
+            count = intensity_counts[level]
+            print(f"  - 震度 {level}: {count} 秒")
 
     if max_intensity_time:
         max_intensity_dt = datetime.fromtimestamp(max_intensity_time / 1000.0, tz=timezone(timedelta(hours=8)))
-        print(f"最大計測震度: {max_intensity:.1f} 級 (發生於 {max_intensity_dt.strftime('%Y-%m-%d %H:%M:%S')})")
+        max_intensity_str = format_intensity(max_intensity)
+        print(f"最大震度: {max_intensity_str} (最大計測震度: {max_intensity:.1f}) (發生於 {max_intensity_dt.strftime('%Y-%m-%d %H:%M:%S')})")
 
     if max_pga_time:
         max_pga_dt = datetime.fromtimestamp(max_pga_time / 1000.0, tz=timezone(timedelta(hours=8)))
@@ -340,13 +367,14 @@ def plot_charts(results, intensity_counts, start_time_ms, end_time_ms, tz_utc_8)
 
     # --- Plot 2: Intensity duration ---
     if intensity_counts:
-        levels = [str(level) for level in sorted(intensity_counts.keys())]
-        durations = [intensity_counts[float(level)] for level in levels]
+        jma_order = ["0級", "1級", "2級", "3級", "4級", "5弱", "5強", "6弱", "6強", "7級"]
+        levels = sorted(intensity_counts.keys(), key=lambda x: jma_order.index(x) if x in jma_order else len(jma_order))
+        durations = [intensity_counts[level] for level in levels]
 
         bars = ax2.bar(levels, durations, color='#ff6b6b')
 
-        ax2.set_title('各計測震度持續時間')
-        ax2.set_xlabel('計測震度 (級)')
+        ax2.set_title('各震度級別持續時間')
+        ax2.set_xlabel('震度級別')
         ax2.set_ylabel('持續時間 (秒)')
         ax2.grid(axis='y', linestyle='--', alpha=0.7)
 
@@ -354,8 +382,8 @@ def plot_charts(results, intensity_counts, start_time_ms, end_time_ms, tz_utc_8)
             yval = bar.get_height()
             ax2.text(bar.get_x() + bar.get_width()/2.0, yval + 0.5, f'{yval}s', ha='center', va='bottom', color='white')
     else:
-        ax2.set_title('各計測震度持續時間 (No data)')
-        ax2.text(0.5, 0.5, 'No intensity duration data to display.', horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes, color='gray')
+        ax2.set_title('各震度級別持續時間 (無資料)')
+        ax2.text(0.5, 0.5, '沒有震度持續時間資料可顯示。', horizontalalignment='center', verticalalignment='center', transform=ax2.transAxes, color='gray')
 
 
     plt.tight_layout(pad=3.0)
