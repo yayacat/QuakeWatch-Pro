@@ -32,6 +32,6 @@ else:
         print(response.text)
     except requests.exceptions.ConnectTimeout:
         print("連線超時。無法連接到 'http://192.168.4.1'。請檢查：")
-        print("1. 您是否已連接到目標設備的WiFi網路？")
+        print("1. 您是否已連接到目標裝置的WiFi網路？")
     except requests.exceptions.RequestException as e:
         print(f"發生未預期的錯誤：{e}")
