@@ -1,6 +1,7 @@
 import serial
 import serial.tools.list_ports
 import struct
+import math
 import os
 import time
 from threading import Thread
@@ -95,6 +96,18 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
+
+                # isfinite() 會排除 NaN (非數字) 和 Inf (無限大)
+                if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z)):
+                    # 如果數值是 NaN 或 無限大，視為感測器錯誤
+                    self.packet_count['error'] += 1
+                    return None  # 這一筆資料直接丟棄，不要往後傳
+
+                # 你可以再次確認它們不是 None (雖然這在 unpack 邏輯下是不可能的)
+                if x is None or y is None or z is None:
+                    self.packet_count['error'] += 1
+                    return None
+
                 # 檢查時間戳是否為有效的13位毫秒級時間戳
                 if not isinstance(timestamp, int) or not (1000000000000 <= timestamp < 10000000000000):
                     self.packet_count['error'] += 1
@@ -121,6 +134,18 @@ class SerialDataCollector:
                     return None
 
                 timestamp, intensity, a = struct.unpack('<Qff', data)
+
+                # isfinite() 會排除 NaN (非數字) 和 Inf (無限大)
+                if not (math.isfinite(intensity) and math.isfinite(a)):
+                    # 如果數值是 NaN 或 無限大，視為感測器錯誤
+                    self.packet_count['error'] += 1
+                    return None  # 這一筆資料直接丟棄，不要往後傳
+
+                # 你可以再次確認它們不是 None (雖然這在 unpack 邏輯下是不可能的)
+                if intensity is None or a is None:
+                    self.packet_count['error'] += 1
+                    return None
+
                 # 檢查時間戳是否為有效的13位毫秒級時間戳
                 if timestamp == 0:
                     timestamp = self._get_timestamp_utc8()
@@ -149,6 +174,18 @@ class SerialDataCollector:
                     return None
 
                 timestamp, x, y, z = struct.unpack('<Qfff', data)
+
+                # isfinite() 會排除 NaN (非數字) 和 Inf (無限大)
+                if not (math.isfinite(x) and math.isfinite(y) and math.isfinite(z)):
+                    # 如果數值是 NaN 或 無限大，視為感測器錯誤
+                    self.packet_count['error'] += 1
+                    return None  # 這一筆資料直接丟棄，不要往後傳
+
+                # 你可以再次確認它們不是 None (雖然這在 unpack 邏輯下是不可能的)
+                if x is None or y is None or z is None:
+                    self.packet_count['error'] += 1
+                    return None
+
                 # 檢查時間戳是否為有效的13位毫秒級時間戳
                 if not isinstance(timestamp, int) or not (1000000000000 <= timestamp < 10000000000000):
                     self.packet_count['error'] += 1
@@ -402,8 +439,6 @@ class SerialDataCollector:
                 filtered_rate = self.packet_count['filtered'] / \
                     elapsed if elapsed > 0 else 0
                 intensity_rate = self.packet_count['intensity'] / \
-                    elapsed if elapsed > 0 else 0
-                filtered_rate = self.packet_count['filtered'] / \
                     elapsed if elapsed > 0 else 0
                 error_rate = self.packet_count['error'] / \
                     elapsed if elapsed > 0 else 0

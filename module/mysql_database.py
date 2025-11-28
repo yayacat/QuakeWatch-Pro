@@ -230,7 +230,7 @@ class MySQLDatabase:
         mysql_thread.start()
         return mysql_thread
 
-    def write_to_database(self, data_type, data_list, retries=3, delay=1):
+    def write_to_database(self, data_type, data_list, retries=30, delay=60):
         """批次寫入mysql資料庫，帶有重試機制。如果最終失敗，會拋出 mysql.connector.Error。"""
         if not data_list or self.conn is None:
             return 0

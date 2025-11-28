@@ -8,13 +8,14 @@ class DataHttpPoster:
     """
     Thread to collect data from a queue and post it to an HTTP server.
     """
-    def __init__(self, data_queue: Queue, active_event: Event, post_url: str, post_interval: float = 1.0, sample_rate: int = 50, station: str = "ESPRO"):
+    def __init__(self, data_queue: Queue, active_event: Event, post_url: str, post_interval: float = 1.0, sample_rate: int = 50, station: str = "ESPRO", timeout: float = 10.0):
         super().__init__()
         self.data_queue = data_queue
         self.active_event = active_event
         self.post_url = post_url
         self.post_interval = post_interval
         self.sample_rate = sample_rate
+        self.timeout = timeout
         self.daemon = True
         # self._buffer = {
         #     'Timestamp': None,
@@ -124,7 +125,7 @@ class DataHttpPoster:
             "Data": data,
         }
         try:
-            response = requests.post(self.post_url, json=payload, timeout=2.0)
+            response = requests.post(self.post_url, json=payload, timeout=self.timeout)
             if response.status_code >= 400:
                 print(f"[HTTP Poster] Error: Server returned status {response.status_code} - {response.text}")
         except requests.RequestException as e:
