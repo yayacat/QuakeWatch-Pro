@@ -27,6 +27,8 @@ class DataHttpPoster:
         # self._last_post_time = time.time()
         self.station = station
 
+        self.session = requests.Session()
+
     def http_poster_thread(self):
         """
         The main loop of the thread.
@@ -41,43 +43,42 @@ class DataHttpPoster:
         sensor_buffer = []
 
         def flush_buffers():
-            """寫入所有緩衝區的數據"""
+            if not sensor_buffer:
+                return
+
+            # 只需要拿第一筆資料的時間即可
+            start_timestamp = sensor_buffer[0][1]
+
             batched_data = {
-                'ELN': {'data': [], 'timestamp': None},
-                'ELE': {'data': [], 'timestamp': None},
-                'ELZ': {'data': [], 'timestamp': None}
+                'ELN': [],
+                'ELE': [],
+                'ELZ': []
             }
 
+            # 對應 index: 2->ELN, 3->ELE, 4->ELZ
             SEED_CONFIG = {2: 'ELN', 3: 'ELE', 4: 'ELZ'}
 
+            # 資料分類
             for value in sensor_buffer:
-                timestamp = value[1]
                 for index, seed_name in SEED_CONFIG.items():
-                    component_value = value[index]
-                    batched_data[seed_name]['data'].append(float(component_value))
-                    batched_data[seed_name]['timestamp'] = timestamp
+                    batched_data[seed_name].append(float(value[index]))
 
-            # Post the batched data for each channel.
-            total_posted = 0
-            for seed_name, batch in batched_data.items():
-                if batch['data']:
-                    # The _post_data method resets the buffer, so we populate it for each batch.
-                    self._post_data(batch['timestamp'], seed_name, batch['data'])
-                    # print(f"[HTTP Poster] Posted {len(batch['data'])} sensor data points for channel {seed_name}")
-                    total_posted += len(batch['data'])
+            # 發送資料
+            all_success = True
+            for seed_name, data_points in batched_data.items():
+                if data_points:
+                    # 傳送起始時間與資料列表
+                    if not self._post_data(start_timestamp, seed_name, data_points):
+                        all_success = False
 
-            # if total_posted > 0:
-                # print(f"[HTTP Poster] Totally posted {total_posted} sensor data points")
-            sensor_buffer.clear()
-
-            # try:
-            #     # current_time = time.time()
-            #     # if (current_time - self._last_post_time >= WRITE_INTERVAL) and self._buffer['Timestamp'] and self._buffer['SeedName'] and self._buffer['Data']:
-            #     #     self._post_data()
-            # except Empty:
-            #     # This is expected when the queue is empty.
-            #     # We'll proceed to check if it's time to post any buffered data.
-            #     pass
+            # 注意：這裡是一個簡單的重試邏輯。如果失敗，資料會留在 sensor_buffer 中
+            # 下次迴圈會再次嘗試發送 (連同新資料一起)
+            # 若要更嚴謹，可能需要將失敗的資料獨立暫存，避免 buffer 無限膨脹
+            if all_success:
+                sensor_buffer.clear()
+            else:
+                print("[HTTP Poster] Warning: Upload failed, keeping data in buffer.")
+                time.sleep(1) # 失敗時稍微暫停，避免瘋狂重試
 
         while self.active_event.is_set() or not self.data_queue['http'].empty():
             current_time = time.time()
@@ -115,29 +116,24 @@ class DataHttpPoster:
 
     def _post_data(self, timestamp, seed_name, data):
         """
-        Posts the buffered data to the server.
+        回傳 True 代表成功，False 代表失敗
         """
         payload = {
             "Station": self.station,
             "SampleRate": self.sample_rate,
-            "Timestamp": timestamp,
+            "Timestamp": timestamp, # 這裡是起始時間
             "SeedName": seed_name,
             "Data": data,
         }
         try:
-            response = requests.post(self.post_url, json=payload, timeout=self.timeout)
+            response = self.session.post(self.post_url, json=payload, timeout=self.timeout)
             if response.status_code >= 400:
-                print(f"[HTTP Poster] Error: Server returned status {response.status_code} - {response.text}")
+                print(f"[HTTP Poster] Error: Server returned {response.status_code}")
+                return False
+            return True
         except requests.RequestException as e:
-            print(f"[HTTP Poster] Error sending data: {e}")
-
-        # Reset buffer for the next batch
-        # self._buffer = {
-        #     'Timestamp': None,
-        #     'SeedName': '',
-        #     'Data': [],
-        # }
-        # self._last_post_time = time.time()
+            print(f"[HTTP Poster] Network Error: {e}")
+            return False
 
     def start_http_thread(self):
         """啟動HTTP資料發送線程"""
