@@ -2,7 +2,7 @@ import asyncio
 import json
 from threading import Thread
 from websockets.server import serve
-from websockets.exceptions import ConnectionClosedError
+from websockets.exceptions import ConnectionClosed, ConnectionClosedError
 
 class WebSocketServer:
     """
@@ -25,7 +25,7 @@ class WebSocketServer:
         """
         # 假設 self.db_conn 是執行緒安全的。
         # 每次查詢都建立一個新的 cursor。
-        cursor = self.db_conn.cursor()
+        cursor = self.db_conn
         cursor.execute(query, params)
         results = cursor.fetchall()
         return results if results is not None else []
@@ -115,7 +115,7 @@ class WebSocketServer:
         for client in self.clients:
             try:
                 await client.send(message)
-            except ConnectionClosedError:
+            except ConnectionClosed:
                 disconnected_clients.add(client)
 
         # 移除斷線的客戶端

@@ -80,7 +80,7 @@ class Sqlite3Database:
         cursor.execute('PRAGMA query_only=ON;')      # 嚴格唯讀
         cursor.execute('PRAGMA read_uncommitted=1;') # 放寬一致性，減少阻塞
 
-        return conn
+        return cursor
 
     def _commit_with_retry(self, retries=5, backoff=0.05):
         """對付 'database is locked' 的指數退避 commit"""
