@@ -108,6 +108,26 @@ def compute_psd_db(fft_data):
     return np.clip(psd_db, -110, 0)
 
 
+def to_db_time_format(dt_obj):
+    """將 datetime 物件轉換為資料庫使用的 YYYYMMDDHHMMSS.ffffff 浮點數格式"""
+    if not isinstance(dt_obj, datetime):
+        return 0.0
+    # 格式化為 'YYYYMMDDHHMMSS.ffffff' 字串再轉為浮點數
+    return float(dt_obj.strftime("%Y%m%d%H%M%S.%f"))
+
+
+def from_db_time_format(db_time):
+    """將資料庫使用的 YYYYMMDDHHMMSS.fff 浮點數格式轉換為带時區的 datetime 物件"""
+    if db_time is None or not isinstance(db_time, (float, int)) or db_time < 1:
+        return None
+    try:
+        time_str = f"{db_time:.6f}"
+        # 解析 YYYYMMDDHHMMSS.ffffff
+        return datetime.strptime(time_str, "%Y%m%d%H%M%S.%f").replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
 def clean_old_data():
     """清理超過時間窗口的舊資料"""
     if len(time_data) == 0:
@@ -169,170 +189,136 @@ def parsing_thread():
     first_received_time = None
 
     print(f"[解析線程] 已啟動 (時間窗口: {DATA_WINDOW_LENGTH} 秒)\n")
-    report_interval = 1.0
     clean_interval = 2.0
     last_clean_time = time.time()
     last_rx_sensor = None
     last_rx_intensity = None
     last_rx_filtered = None
 
+    try:
+        dbconfig = {
+            "host": DB_HOST,
+            "user": DB_USER,
+            "password": DB_PASSWORD,
+            "database": DB_NAME,
+            "connect_timeout": 5,
+        }
+        cnxpool = mysql.connector.pooling.MySQLConnectionPool(
+            pool_name="main_pool",
+            pool_size=5,
+            **dbconfig
+        )
+        print("[MySQL] 資料庫連接池創建成功")
+    except mysql.connector.Error as e:
+        print(f"[MySQL Error] 連接池創建失敗: {e}")
+        return  # 如果連接池創建失敗，則退出線程
+
     while parsing_active.is_set():
         conn = None
+        cursor = None
         try:
-            conn = mysql.connector.connect(
-                host=DB_HOST,
-                user=DB_USER,
-                password=DB_PASSWORD,
-                database=DB_NAME
-            )
+            conn = cnxpool.get_connection()
             cursor = conn.cursor()
 
-            cutoff_time = time.time() - 60
+            # --- 通用時間處理 ---
+            cutoff_datetime = datetime.now(timezone.utc) - timedelta(seconds=DATA_WINDOW_LENGTH)
 
-            if last_rx_sensor is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (station, cutoff_time,))
-                sensor_rows = cursor.fetchall()
-                if sensor_rows:
-                    last_rx_sensor = sensor_rows[-1][4]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (station, max(last_rx_sensor, cutoff_time)))
-                sensor_rows = cursor.fetchall()
+            # --- SENSOR DATA 查詢 ---
+            sensor_query_dt = cutoff_datetime
+            if last_rx_sensor and last_rx_sensor > cutoff_datetime:
+                sensor_query_dt = last_rx_sensor
+
+            sensor_query_db_time = to_db_time_format(sensor_query_dt)
+
+            cursor.execute(
+                'SELECT timestamp_ms, x, y, z, received_time FROM sensor_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC, timestamp_ms ASC LIMIT 500',
+                (station, sensor_query_db_time))
+            sensor_rows = cursor.fetchall()
 
             if sensor_rows:
+                last_row_rx_time_db = sensor_rows[-1][4]
+                last_rx_sensor = from_db_time_format(last_row_rx_time_db)
                 with data_lock:
                     for row in sensor_rows:
-                        timestamp, x, y, z, received_time = row
-                        last_rx_sensor = received_time
-                        if first_received_time is None:
-                            first_received_time = received_time
-
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
-
-                        x_data.append(x)
-                        y_data.append(y)
-                        z_data.append(z)
-
-                        # 即時計算 PGA
-                        pga_value = np.sqrt(x**2 + y**2 + z**2)
-                        pga_raw.append(pga_value)
-
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time = received_time - first_received_time
-
+                        timestamp, x, y, z, received_time_db = row
+                        received_time = from_db_time_format(received_time_db)
+                        if not received_time: continue
+                        if first_received_time is None: first_received_time = received_time.timestamp()
+                        if timestamp >= 1000000000000 and (first_timestamp is None or timestamp < first_timestamp): first_timestamp = timestamp
+                        x_data.append(x); y_data.append(y); z_data.append(z)
+                        pga_raw.append(np.sqrt(x**2 + y**2 + z**2))
+                        adjusted_time = ((timestamp - first_timestamp) / 1000.0) if (timestamp >= 1000000000000 and first_timestamp is not None) else (received_time.timestamp() - first_received_time)
                         time_data.append(adjusted_time)
                         timestamp_data.append(timestamp)
                         parse_stats['total_parsed'] += 1
 
-            if last_rx_intensity is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC',
-                    (station, cutoff_time,))
-                intensity_rows = cursor.fetchall()
-                if intensity_rows:
-                    last_rx_intensity = intensity_rows[-1][3]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC',
-                    (station, max(last_rx_intensity, cutoff_time)))
-                intensity_rows = cursor.fetchall()
+            # --- INTENSITY DATA 查詢 ---
+            intensity_query_dt = cutoff_datetime
+            if last_rx_intensity and last_rx_intensity > cutoff_datetime:
+                intensity_query_dt = last_rx_intensity
+            intensity_query_db_time = to_db_time_format(intensity_query_dt)
+            cursor.execute(
+                'SELECT timestamp_ms, intensity, a, received_time FROM intensity_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC, timestamp_ms ASC LIMIT 50',
+                (station, intensity_query_db_time))
+            intensity_rows = cursor.fetchall()
 
             if intensity_rows:
+                last_row_rx_time_db = intensity_rows[-1][3]
+                last_rx_intensity = from_db_time_format(last_row_rx_time_db)
                 with data_lock:
                     for row in intensity_rows:
-                        timestamp, intensity, a, received_time = row
-                        last_rx_intensity = received_time
-                        if first_received_time is None:
-                            first_received_time = received_time
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
-                        intensity_history.append(intensity)
-                        a_history.append(a)
-
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time_int = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time_int = received_time - first_received_time
-
+                        timestamp, intensity, a, received_time_db = row
+                        received_time = from_db_time_format(received_time_db)
+                        if not received_time: continue
+                        if first_received_time is None: first_received_time = received_time.timestamp()
+                        if timestamp >= 1000000000000 and (first_timestamp is None or timestamp < first_timestamp): first_timestamp = timestamp
+                        intensity_history.append(intensity); a_history.append(a)
+                        adjusted_time_int = ((timestamp - first_timestamp) / 1000.0) if (timestamp >= 1000000000000 and first_timestamp is not None) else (received_time.timestamp() - first_received_time)
                         intensity_time.append(adjusted_time_int)
                         intensity_timestamp.append(timestamp)
                         parse_stats['total_parsed'] += 1
 
-            if last_rx_filtered is None:
-                cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (station, cutoff_time,))
-                filtered_rows = cursor.fetchall()
-                if filtered_rows:
-                    last_rx_filtered = filtered_rows[-1][4]
-            else:
-                cursor.execute(
-                    'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE station = %s AND received_time > %s ORDER BY timestamp_ms ASC',
-                    (station, max(last_rx_filtered, cutoff_time)))
-                filtered_rows = cursor.fetchall()
-
+            # --- FILTERED DATA 查詢 ---
+            filtered_query_dt = cutoff_datetime
+            if last_rx_filtered and last_rx_filtered > cutoff_datetime:
+                filtered_query_dt = last_rx_filtered
+            filtered_query_db_time = to_db_time_format(filtered_query_dt)
+            cursor.execute(
+                'SELECT timestamp_ms, h1, h2, v, received_time FROM filtered_data WHERE station = %s AND received_time > %s ORDER BY received_time ASC, timestamp_ms ASC LIMIT 500',
+                (station, filtered_query_db_time))
+            filtered_rows = cursor.fetchall()
             if filtered_rows:
+                last_row_rx_time_db = filtered_rows[-1][4]
+                last_rx_filtered = from_db_time_format(last_row_rx_time_db)
                 with data_lock:
                     for row in filtered_rows:
-                        timestamp, h1, h2, v, received_time = row
-                        last_rx_filtered = received_time
-                        if first_received_time is None:
-                            first_received_time = received_time
-
-                        if timestamp >= 1000000000000:
-                            if first_timestamp is None or timestamp < first_timestamp:
-                                first_timestamp = timestamp
-
-                        h1_data.append(h1)
-                        h2_data.append(h2)
-                        v_data.append(v)
-
-                        if timestamp >= 1000000000000 and first_timestamp is not None:
-                            adjusted_time_filt = (
-                                timestamp - first_timestamp) / 1000.0
-                        else:
-                            adjusted_time_filt = received_time - first_received_time
-
+                        timestamp, h1, h2, v, received_time_db = row
+                        received_time = from_db_time_format(received_time_db)
+                        if not received_time: continue
+                        if first_received_time is None: first_received_time = received_time.timestamp()
+                        if timestamp >= 1000000000000 and (first_timestamp is None or timestamp < first_timestamp): first_timestamp = timestamp
+                        h1_data.append(h1); h2_data.append(h2); v_data.append(v)
+                        adjusted_time_filt = ((timestamp - first_timestamp) / 1000.0) if (timestamp >= 1000000000000 and first_timestamp is not None) else (received_time.timestamp() - first_received_time)
                         filtered_time.append(adjusted_time_filt)
                         filtered_timestamp.append(timestamp)
                         parse_stats['total_parsed'] += 1
 
-            if conn and conn.is_connected():
-                cursor.close()
-                conn.close()
-
         except mysql.connector.Error as e:
-            print(f"[MySQL Error] {e}")
+            print(f"[MySQL Error] 查詢或連線錯誤: {e}")
+            time.sleep(2)  # 發生錯誤時等待，避免快速重試
+        finally:
+            if cursor:
+                cursor.close()
             if conn and conn.is_connected():
                 conn.close()
 
-        time.sleep(0.1)
+        time.sleep(0.5)
 
         current_check_time = time.time()
         if current_check_time - last_clean_time >= clean_interval:
             with data_lock:
                 clean_old_data()
             last_clean_time = current_check_time
-
-        if current_check_time - parse_stats['last_report_time'] >= report_interval:
-            with data_lock:
-                parsed_count = parse_stats['total_parsed'] - \
-                    parse_stats['last_report_count']
-                rate = parsed_count / report_interval
-                time_span = time_data[-1] - \
-                    time_data[0] if len(time_data) > 1 else 0
-
-    print("[解析線程] 已停止")
 
 
 _last_fft_update_time = 0
