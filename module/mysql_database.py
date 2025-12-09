@@ -16,7 +16,6 @@ class MySQLDatabase:
             'user': os.getenv('DB_USER'),
             'password': os.getenv('DB_PASSWORD'),
             'database': os.getenv('DB_DATABASE'),
-            'ssl_disabled': True
         }
         self.conn = self.connect()
         self.data_queue = data_queue
@@ -32,8 +31,9 @@ class MySQLDatabase:
                 host=self.db_config['host'],
                 user=self.db_config['user'],
                 password=self.db_config['password'],
+                database=self.db_config['database'],
                 autocommit=True,
-                ssl_disabled=True
+                ssl_disabled=True,
             )
             cursor = conn_check.cursor()
             cursor.execute(f"CREATE DATABASE IF NOT EXISTS {self.db_config['database']} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
