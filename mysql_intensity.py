@@ -93,7 +93,7 @@ def fetch_data(conn, start_time_ms, end_time_ms, data_type='raw'):
         cursor = conn.cursor()
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"執行查詢: {table_name} from {start_time_str} to {end_time_str} (UTC+8) 測站名: {station}")
+        print(f"執行查詢: {table_name} from {start_time_str} to {end_time_str} (UTC+8) 測站id: {station}")
         cursor.execute(query, (station, start_time_ms, end_time_ms))
         results = cursor.fetchall()
         cursor.close()
@@ -193,7 +193,7 @@ def fetch_intensity_data(mysql: mysql_connector, start_time_ms=None, end_time_ms
         params = (station, start_time_ms, end_time_ms)
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"\n執行查詢: intensity_data from {start_time_str} to {end_time_str} (UTC+8) 測站名: {station}")
+        print(f"\n執行查詢: intensity_data from {start_time_str} to {end_time_str} (UTC+8) 測站id: {station}")
         # 使用 dictionary=True 可以讓結果以字典形式呈現，方便閱讀
         return mysql.execute_query(query, params, dictionary=True)
 
@@ -396,7 +396,7 @@ def main():
     parser.add_argument('start_time', nargs='?', default=None, help='開始時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
-    parser.add_argument('-s', '--station', type=str, default=None, help='指定站點 ID')
+    parser.add_argument('-s', '--station', type=str, default=None, help='指定測站 ID')
 
     args = parser.parse_args()
 
