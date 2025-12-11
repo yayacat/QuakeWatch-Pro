@@ -391,13 +391,18 @@ def plot_charts(results, intensity_counts, start_time_ms, end_time_ms, tz_utc_8)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='從 MySQL 資料庫查詢地震資料並匯出為 SAC 或 miniSEED 檔案。')
+    parser = argparse.ArgumentParser(description='從 MySQL 資料庫查詢地震資料並分析震度。')
     parser.add_argument('o_time', nargs='?', default=None, help='發震時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('start_time', nargs='?', default=None, help='開始時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
+    parser.add_argument('-s', '--station', type=str, default=None, help='指定站點 ID')
 
     args = parser.parse_args()
+
+    if args.station:
+        global station
+        station = args.station
 
     tz_utc_8 = timezone(timedelta(hours=8))
 
