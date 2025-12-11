@@ -93,7 +93,7 @@ def fetch_data(conn, start_time_ms, end_time_ms, data_type='raw'):
         cursor = conn.cursor()
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"執行查詢: {table_name} from {start_time_str} to {end_time_str} (UTC+8)")
+        print(f"執行查詢: {table_name} from {start_time_str} to {end_time_str} (UTC+8) 測站名: {station}")
         cursor.execute(query, (station, start_time_ms, end_time_ms))
         results = cursor.fetchall()
         cursor.close()
@@ -193,7 +193,7 @@ def fetch_intensity_data(mysql: mysql_connector, start_time_ms=None, end_time_ms
         params = (station, start_time_ms, end_time_ms)
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
         end_time_str = datetime.fromtimestamp(end_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
-        print(f"\n執行查詢: intensity_data from {start_time_str} to {end_time_str} (UTC+8)")
+        print(f"\n執行查詢: intensity_data from {start_time_str} to {end_time_str} (UTC+8) 測站名: {station}")
         # 使用 dictionary=True 可以讓結果以字典形式呈現，方便閱讀
         return mysql.execute_query(query, params, dictionary=True)
 
