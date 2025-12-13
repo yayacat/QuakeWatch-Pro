@@ -7,7 +7,9 @@ class mysql_connector:
             'host': host,
             'user': user,
             'password': password,
-            'database': database
+            'database': database,
+            'autocommit': True,
+            'ssl_disabled': True,
         }
         self.conn = self.connect()
 
