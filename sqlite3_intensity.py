@@ -218,8 +218,8 @@ def plot_charts(results, intensity_counts, start_time_ms, end_time_ms, tz_utc_8)
 
 def main():
     parser = argparse.ArgumentParser(description='從 SQLite 資料庫查詢地震強度資料並繪製圖表。')
-    parser.add_argument('o_time', nargs='?', default=None, help='發震時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
-    parser.add_argument('start_time', nargs='?', default=None, help='開始時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
+    # parser.add_argument('o_time', nargs='?', default=None, help='發震時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
+    parser.add_argument('start_time', nargs='?', default=None, help='發震(開始)時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
 
@@ -227,16 +227,16 @@ def main():
 
     tz_utc_8 = timezone(timedelta(hours=8))
 
-    # o_time 自動定出前後5 分鐘為開始與結束時間，優先級比 start_time 和 end_time 高
-    if args.o_time:
+    # start_time 自動定出前後5 分鐘為開始與結束時間，優先級比 start_time 和 end_time 高
+    if args.start_time and args.end_time is None:
         try:
-            o_time_dt_naive = datetime.strptime(args.o_time, '%Y-%m-%dT%H:%M:%S')
-            o_time_dt_aware = o_time_dt_naive.replace(tzinfo=tz_utc_8)
-            start_dt_aware = o_time_dt_aware - timedelta(minutes=5)
-            end_dt_aware = o_time_dt_aware + timedelta(minutes=5)
-            print(f"已提供 o_time，自動設定時間範圍為: {start_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')} to {end_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')}")
+            start_time_dt_naive = datetime.strptime(args.start_time, '%Y-%m-%dT%H:%M:%S')
+            start_time_dt_aware = start_time_dt_naive.replace(tzinfo=tz_utc_8)
+            start_dt_aware = start_time_dt_aware - timedelta(minutes=args.time)
+            end_dt_aware = start_time_dt_aware + timedelta(minutes=args.time)
+            print(f"已提供 start_time，自動設定時間範圍為: {start_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')} to {end_dt_aware.strftime('%Y-%m-%dT%H:%M:%S')}")
         except ValueError:
-            parser.error("錯誤的 o_time 格式。請使用 YYYY-MM-DDTHH:MM:SS。")
+            parser.error("錯誤的 start_time 格式。請使用 YYYY-MM-DDTHH:MM:SS。")
     elif args.start_time is None or args.end_time is None:
         end_dt_aware = datetime.now(tz_utc_8)
         start_dt_aware = end_dt_aware - timedelta(minutes=args.time)
