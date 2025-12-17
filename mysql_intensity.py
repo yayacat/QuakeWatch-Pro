@@ -302,8 +302,8 @@ def plot_charts(results, plot_station_id, station_intensity_counts, start_time_m
 
 def main():
     parser = argparse.ArgumentParser(description='從 MySQL 資料庫查詢地震資料並分析震度。')
+    # parser.add_argument('o_time', nargs='?', default=None, help='發震時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('start_time', nargs='?', default=None, help='發震(開始)時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
-    # parser.add_argument('start_time', nargs='?', default=None, help='開始時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
     parser.add_argument('-s', '--station', type=str, default=os.getenv("station", "ESPRO"), help=f'指定單一測站 ID (預設: {os.getenv("station", "ESPRO")})')
