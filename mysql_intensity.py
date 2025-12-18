@@ -198,7 +198,7 @@ def plot_charts(results, plot_station_id, station_intensity_counts, start_time_m
     plt.style.use('dark_background')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 12), num='地震震度分析圖表', gridspec_kw={'height_ratios': [2, 1]})
 
-    # --- Group data by station to determine if it's multi-station mode ---
+    # --- Group data by station and create a consistent color map ---
     station_data = {}
     if results:
         for row in results:
@@ -207,14 +207,23 @@ def plot_charts(results, plot_station_id, station_intensity_counts, start_time_m
                 station_data[s_id] = []
             station_data[s_id].append(row)
 
-    is_multi_station = len(station_data) > 1
+    # Get all unique station IDs from both data sources
+    all_station_ids = set(station_data.keys())
+    if station_intensity_counts:
+        all_station_ids.update(station_intensity_counts.keys())
+
+    sorted_station_ids = sorted(list(all_station_ids))
+    is_multi_station = len(sorted_station_ids) > 1
+
+    colors = plt.colormaps.get_cmap('tab10')
+    station_colors = {s_id: colors(i % 10) for i, s_id in enumerate(sorted_station_ids)}
+
 
     # --- Plot 1: Intensity over time ---
     plot1_has_data = False
     if station_data:
-        colors = plt.colormaps.get_cmap('tab10')
-
-        for i, (s_id, station_rows) in enumerate(station_data.items()):
+        for s_id in sorted_station_ids:
+            station_rows = station_data.get(s_id)
             if not station_rows:
                 continue
 
@@ -231,7 +240,7 @@ def plot_charts(results, plot_station_id, station_intensity_counts, start_time_m
                 dates = [datetime.fromtimestamp(ts / 1000.0, tz=tz_utc_8) for ts in timestamps]
 
                 label = f'測站 {s_id}' if is_multi_station else '計測震度'
-                ax1.plot(dates, intensities, color=colors(i % 10), marker='o', linestyle='-', markersize=4, label=label)
+                ax1.plot(dates, intensities, color=station_colors.get(s_id), marker='o', linestyle='-', markersize=4, label=label)
 
     if plot1_has_data:
         start_time_str = datetime.fromtimestamp(start_time_ms / 1000.0, tz=tz_utc_8).strftime('%Y-%m-%d %H:%M:%S')
@@ -260,22 +269,19 @@ def plot_charts(results, plot_station_id, station_intensity_counts, start_time_m
 
         sorted_levels = sorted(list(all_levels), key=lambda x: jma_order.index(x) if x in jma_order else len(jma_order))
 
-        station_ids = sorted(station_intensity_counts.keys())
-        num_stations = len(station_ids)
+        num_stations = len(sorted_station_ids)
         x = np.arange(len(sorted_levels))
         total_width = 0.8
         bar_width = total_width / num_stations
 
-        colors = plt.colormaps.get_cmap('tab10')
-
-        for i, station_id in enumerate(station_ids):
+        for i, station_id in enumerate(sorted_station_ids):
             counts = station_intensity_counts.get(station_id, {})
             durations = [counts.get(level, 0) for level in sorted_levels]
 
             # Calculate position for each station's bar
             position = x - (total_width / 2) + (i * bar_width) + (bar_width / 2)
 
-            bars = ax2.bar(position, durations, bar_width, label=f'測站 {station_id}', color=colors(i % 10))
+            bars = ax2.bar(position, durations, bar_width, label=f'測站 {station_id}', color=station_colors.get(station_id))
             for bar in bars:
                 yval = bar.get_height()
                 if yval > 0:

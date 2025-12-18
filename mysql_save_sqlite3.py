@@ -94,7 +94,7 @@ def get_sqlite_connection(db_file):
         print(f"✗ SQLite3 connection error: {err}")
         return None
 
-def transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms):
+def transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms, station, all_stations):
     """Transfers data from MySQL to SQLite for a given time range."""
     mysql_cursor = mysql_conn.cursor()
     sqlite_cursor = sqlite_conn.cursor()
@@ -110,9 +110,15 @@ def transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms):
             FROM {table_name}
             WHERE station = %s AND timestamp_ms >= %s AND timestamp_ms <= %s
             ORDER BY timestamp_ms ASC;
+        """ if not all_stations else f"""
+            SELECT {mysql_cols_str}
+            FROM {table_name}
+            WHERE timestamp_ms >= %s AND timestamp_ms <= %s
+            ORDER BY timestamp_ms ASC;
         """
+        params = (station, start_time_ms, end_time_ms) if not all_stations else (start_time_ms, end_time_ms)
         try:
-            mysql_cursor.execute(query, (station, start_time_ms, end_time_ms))
+            mysql_cursor.execute(query, params)
             results = mysql_cursor.fetchall()
             print(f"✓ Fetched {len(results)} rows from MySQL table '{table_name}'.")
         except mysql.connector.Error as err:
@@ -148,6 +154,8 @@ def main():
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
     parser.add_argument('-o', '--output', default='earthquake_data_archive.db', help='Output SQLite database file name. Default is earthquake_data_archive.db.')
+    parser.add_argument('-s', '--station', default='ESPRO', help='指定測站名稱，預設為 ESPRO。')
+    parser.add_argument('-all', '--all', default=False, help='輸出全部測站資料，預設為 False。')
 
     args = parser.parse_args()
 
@@ -195,7 +203,7 @@ def main():
         end_time_ms = int(end_dt_aware.timestamp() * 1000)
 
         # Perform the data transfer
-        total_rows = transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms)
+        total_rows = transfer_data(mysql_conn, sqlite_conn, start_time_ms, end_time_ms, args.station, args.all)
 
         print(f"\n✓ Data transfer complete. Total rows transferred: {total_rows}")
 
