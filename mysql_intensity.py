@@ -313,7 +313,7 @@ def main():
     parser.add_argument('end_time', nargs='?', default=None, help='結束時間 (UTC+8, 格式: YYYY-MM-DDTHH:MM:SS)')
     parser.add_argument('-t', '--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
     parser.add_argument('-s', '--station', type=str, default=os.getenv("station", "ESPRO"), help=f'指定單一測站 ID (預設: {os.getenv("station", "ESPRO")})')
-    parser.add_argument('--all-stations', action='store_true', help='處理所有可用的測站')
+    parser.add_argument('-all', '--all-stations', action='store_true', help='處理所有可用的測站')
 
     args = parser.parse_args()
 

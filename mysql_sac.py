@@ -53,14 +53,14 @@ def fetch_data(mysql: mysql_connector, start_time_ms, end_time_ms, station_name,
     print(f"執行查詢: {data_type_name} from {start_time_str} to {end_time_str} (UTC+8) for station {station_name}")
     return mysql.execute_query(query, (station_name, start_time_ms, end_time_ms))
 
-def export_to_miniseed(sensor_rows, station_info, output_file='seismic_data.mseed', station_name=station):
+def export_to_miniseed(sensor_rows, station_info, output_file='seismic_data.mseed', station_name=station, save=True):
     """
     匯出為 miniSEED 格式（三軸合併成一個檔案）
     使用 ObsPy 函式庫
     """
     if not sensor_rows:
         print("沒有資料可匯出！")
-        return
+        return None
 
     # 準備資料
     timestamps = np.array([row[0] for row in sensor_rows])
@@ -100,7 +100,7 @@ def export_to_miniseed(sensor_rows, station_info, output_file='seismic_data.msee
     for channel, data in components:
         stats = {
             'network': network,
-            'station': station_name,
+            'station': station_name[:11],
             'location': location,
             'channel': channel,
             'npts': len(data),
@@ -118,21 +118,29 @@ def export_to_miniseed(sensor_rows, station_info, output_file='seismic_data.msee
         trace = Trace(data=data, header=stats)
         stream.append(trace)
 
-    output_file = f'seismic_data_{station_name}_{timestamps[0]}.mseed'
+    if save:
+        output_file = f'seismic_data_{station_name}_{timestamps[0]}.mseed'
 
-    # 寫入 miniSEED 檔案
-    # encoding=11: Steim-2 compression (適合地震資料)
-    # encoding=10: Steim-1 compression
-    # encoding=3: 32-bit integer
-    stream.write(output_file, format='MSEED', encoding=11, reclen=512)
+        # 寫入 miniSEED 檔案
+        # encoding=11: Steim-2 compression (適合地震資料)
+        # encoding=10: Steim-1 compression
+        # encoding=3: 32-bit integer
+        stream.write(output_file, format='MSEED', encoding=11, reclen=512)
 
-    print(f"✓ miniSEED 已匯出至: {output_file}")
-    # if station_info:
-    #     print(f"  測站座標: Lat {station_info['latitude']}, Lon {station_info['longitude']}, Ele {station_info['elevation']}")
-    print(f"  包含 3 個 Trace (EHE, EHN, EHZ)")
-    print(f"  採樣率: {sampling_rate:.2f} Hz")
-    print(f"  資料點數: {len(x_data)}")
-    print(f"  開始時間: {starttime}")
+        print(f"✓ miniSEED 已匯出至: {output_file}")
+        # if station_info:
+        #     print(f"  測站座標: Lat {station_info['latitude']}, Lon {station_info['longitude']}, Ele {station_info['elevation']}")
+        print(f"  包含 3 個 Trace (EHE, EHN, EHZ)")
+        print(f"  採樣率: {sampling_rate:.2f} Hz")
+        print(f"  資料點數: {len(x_data)}")
+        print(f"  開始時間: {starttime}")
+    else:
+        print(f"  包含 3 個 Trace (EHE, EHN, EHZ)")
+        print(f"  採樣率: {sampling_rate:.2f} Hz")
+        print(f"  資料點數: {len(x_data)}")
+        print(f"  開始時間: {starttime}")
+
+    return stream
 
 def main():
     parser = argparse.ArgumentParser(description='從 MySQL 資料庫查詢地震資料並匯出為 SAC 或 miniSEED 檔案。')
@@ -143,6 +151,7 @@ def main():
     parser.add_argument('-t', '--type', choices=['raw', 'filtered'], default='raw', help='資料類型: raw (原始) 或 filtered (濾波)')
     parser.add_argument('-s', '--station', default=station, help='測站名稱')
     parser.add_argument('--time', type=int, default=5, help='時間區間長度（分鐘），預設為 5 分鐘')
+    parser.add_argument('-all', '--all-stations', action='store_true', help='處理所有可用的測站')
 
     args = parser.parse_args()
 
@@ -186,15 +195,43 @@ def main():
         start_time_ms = int(start_dt_aware.timestamp() * 1000)
         end_time_ms = int(end_dt_aware.timestamp() * 1000)
 
-        station_name = args.station
-        station_info = STATION_COORDS.get(station_name)
-        # if not station_info:
-        #     print(f"警告：在 STATION_COORDS 中找不到測站 {station_name} 的經緯度資訊。")
+        stations_to_process = []
+        if args.all_stations:
+            print("正在查詢所有可用測站...")
+            table_name = 'sensor_data' if args.type == 'raw' else 'filtered_data'
+            query = f"SELECT DISTINCT station FROM {table_name} WHERE timestamp_ms >= %s AND timestamp_ms <= %s"
+            rows = mysql.execute_query(query, (start_time_ms, end_time_ms))
+            if rows:
+                stations_to_process = [row[0] for row in rows]
+                print(f"找到測站: {', '.join(stations_to_process)}")
+            else:
+                print("在此時間範圍內未找到任何測站資料。")
+        else:
+            stations_to_process = [args.station]
 
-        data = fetch_data(mysql, start_time_ms, end_time_ms, station_name, args.type, tz_utc_8)
-        if data:
-            print("\n準備匯出為 miniSEED 格式...")
-            export_to_miniseed(data, station_info, args.output, station_name)
+        combined_stream = Stream()
+
+        for station_name in stations_to_process:
+            print(f"\n--- 處理測站: {station_name} ---")
+            station_info = STATION_COORDS.get(station_name)
+            # if not station_info:
+            #     print(f"警告：在 STATION_COORDS 中找不到測站 {station_name} 的經緯度資訊。")
+
+            data = fetch_data(mysql, start_time_ms, end_time_ms, station_name, args.type, tz_utc_8)
+            if data:
+                print(f"準備匯出 {station_name} 為 miniSEED 格式...")
+                should_save = not args.all_stations
+                st = export_to_miniseed(data, station_info, args.output, station_name, save=should_save)
+                if args.all_stations and st:
+                    combined_stream += st
+            else:
+                print(f"測站 {station_name} 無資料。")
+
+        if args.all_stations and len(combined_stream) > 0:
+            output_file = f'seismic_data_ALL_{start_time_ms}.mseed'
+            combined_stream.write(output_file, format='MSEED', encoding=11, reclen=512)
+            print(f"\n✓ 全部測站 miniSEED 已匯出至: {output_file}")
+            print(f"  包含 {len(combined_stream)} 個 Trace")
 
     except Exception as e:
         print(f"✗ 處理資料時發生未預期錯誤: {e}")
